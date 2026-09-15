@@ -1,0 +1,424 @@
+[
+	{
+		"id": "figma",
+		"label": "Figma",
+		"description": "Reads the open Figma file through the desktop Dev Mode MCP.",
+		"mcpUrl": "https://mcp.figma.com/mcp",
+		"docsUrl": "https://developers.figma.com/docs/figma-mcp-server/local-server-installation/",
+		"glyph": "Fi",
+		"auth": "desktop",
+		"scopes": [
+			"mcp:connect"
+		]
+	},
+	{
+		"id": "canva",
+		"label": "Canva",
+		"description": "Pull brand kits, templates, and assets into the builder.",
+		"mcpUrl": "https://mcp.canva.com/mcp",
+		"docsUrl": "https://www.canva.dev/docs/connect/mcp-server/",
+		"glyph": "Ca",
+		"scopes": [
+			"profile:read",
+			"design:meta:read",
+			"design:content:read",
+			"asset:read"
+		]
+	},
+	{
+		"id": "google-sheets",
+		"label": "Google Sheets",
+		"description": "Read and edit spreadsheets the signed-in account can access.",
+		"mcpUrl": "https://sheetsmcp.googleapis.com/mcp/v1",
+		"docsUrl": "https://developers.google.com/workspace/sheets/api/guides/configure-mcp-server",
+		"glyph": "Gs",
+		"auth": "google",
+		"scopes": [
+			"https://www.googleapis.com/auth/spreadsheets",
+			"https://www.googleapis.com/auth/drive.file"
+		]
+	},
+	{
+		"id": "google-drive",
+		"label": "Google Drive",
+		"description": "List and read files in Drive.",
+		"mcpUrl": "https://drivemcp.googleapis.com/mcp/v1",
+		"docsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+		"glyph": "Gd",
+		"auth": "google",
+		"scopes": [
+			"https://www.googleapis.com/auth/drive.readonly",
+			"https://www.googleapis.com/auth/drive.file"
+		]
+	},
+	{
+		"id": "google-docs",
+		"label": "Google Docs",
+		"description": "Read and edit documents the signed-in account can access.",
+		"mcpUrl": "https://docsmcp.googleapis.com/mcp/v1",
+		"docsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+		"glyph": "Go",
+		"auth": "google",
+		"scopes": [
+			"https://www.googleapis.com/auth/documents",
+			"https://www.googleapis.com/auth/drive.file"
+		]
+	},
+	{
+		"id": "google-gmail",
+		"label": "Gmail",
+		"description": "Read and send mail for the signed-in account.",
+		"mcpUrl": "https://gmailmcp.googleapis.com/mcp/v1",
+		"docsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+		"glyph": "Gm",
+		"auth": "google",
+		"scopes": [
+			"https://www.googleapis.com/auth/gmail.modify",
+			"https://www.googleapis.com/auth/gmail.send"
+		]
+	},
+	{
+		"id": "google-calendar",
+		"label": "Google Calendar",
+		"description": "Read and create events on the signed-in calendars.",
+		"mcpUrl": "https://calendarmcp.googleapis.com/mcp/v1",
+		"docsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+		"glyph": "Gc",
+		"auth": "google",
+		"scopes": [
+			"https://www.googleapis.com/auth/calendar"
+		]
+	},
+	{
+		"id": "google-slides",
+		"label": "Google Slides",
+		"description": "Read and edit presentations the signed-in account can access.",
+		"mcpUrl": "https://slidesmcp.googleapis.com/mcp/v1",
+		"docsUrl": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+		"glyph": "Sl",
+		"auth": "google",
+		"scopes": [
+			"https://www.googleapis.com/auth/presentations",
+			"https://www.googleapis.com/auth/drive.file"
+		]
+	},
+	{
+		"id": "microsoft-365",
+		"label": "Microsoft 365",
+		"description": "Read Entra users, groups, and apps through Graph. Excel, Outlook, and OneDrive are not on this server.",
+		"mcpUrl": "https://mcp.svc.cloud.microsoft/enterprise",
+		"docsUrl": "https://learn.microsoft.com/en-us/graph/mcp-server/overview",
+		"glyph": "Ms",
+		"auth": "microsoft",
+		"scopes": [
+			"api://e8c77dc2-69b3-43f4-bc51-3213c9d915b4/.default"
+		]
+	},
+	{
+		"id": "notion",
+		"label": "Notion",
+		"description": "Read specs, docs, and content databases while planning.",
+		"mcpUrl": "https://mcp.notion.com/mcp",
+		"docsUrl": "https://developers.notion.com/docs/mcp",
+		"glyph": "No",
+		"scopes": []
+	},
+	{
+		"id": "linear",
+		"label": "Linear",
+		"description": "Sync issues and project status into tickets.",
+		"mcpUrl": "https://mcp.linear.app/mcp",
+		"docsUrl": "https://linear.app/docs/mcp",
+		"glyph": "Li",
+		"scopes": [
+			"read",
+			"write"
+		]
+	},
+	{
+		"id": "craft",
+		"label": "Craft",
+		"description": "Read docs, daily notes, and space content while planning.",
+		"mcpUrl": "https://mcp.craft.do/my/mcp",
+		"docsUrl": "https://support.craft.do/en/integrate/mcp",
+		"glyph": "Cr",
+		"scopes": []
+	},
+	{
+		"id": "granola",
+		"label": "Granola",
+		"description": "Search meeting notes and transcripts while planning.",
+		"mcpUrl": "https://mcp.granola.ai/mcp",
+		"docsUrl": "https://www.granola.ai/blog/granola-mcp-claude-chatgpt-cursor",
+		"glyph": "Gr",
+		"scopes": [
+			"mcp"
+		]
+	},
+	{
+		"id": "sanity-mcp",
+		"label": "Sanity",
+		"description": "Query projects, schemas, and documents while building.",
+		"mcpUrl": "https://mcp.sanity.io",
+		"docsUrl": "https://www.sanity.io/docs/ai/mcp-server",
+		"glyph": "Sa",
+		"scopes": []
+	},
+	{
+		"id": "stripe-mcp",
+		"label": "Stripe",
+		"description": "Inspect customers, payments, and subscriptions from the agent.",
+		"mcpUrl": "https://mcp.stripe.com",
+		"docsUrl": "https://docs.stripe.com/mcp",
+		"glyph": "S",
+		"scopes": []
+	},
+	{
+		"id": "supabase-mcp",
+		"label": "Supabase",
+		"description": "Inspect projects, schema, and data while building.",
+		"mcpUrl": "https://mcp.supabase.com/mcp",
+		"docsUrl": "https://supabase.com/docs/guides/getting-started/mcp",
+		"glyph": "Sb",
+		"scopes": [
+			"organizations:read",
+			"projects:read",
+			"database:read"
+		]
+	},
+	{
+		"id": "neon-mcp",
+		"label": "Neon",
+		"description": "Query branches, schema, and SQL from the agent.",
+		"mcpUrl": "https://mcp.neon.tech/mcp",
+		"docsUrl": "https://neon.com/docs/ai/neon-mcp-server",
+		"glyph": "Ne",
+		"scopes": []
+	},
+	{
+		"id": "sentry-mcp",
+		"label": "Sentry",
+		"description": "Browse errors, issues, and releases from the agent.",
+		"mcpUrl": "https://mcp.sentry.dev/mcp",
+		"docsUrl": "https://docs.sentry.io/product/sentry-mcp/",
+		"glyph": "Se",
+		"scopes": [
+			"org:read",
+			"event:write"
+		]
+	},
+	{
+		"id": "posthog-mcp",
+		"label": "PostHog",
+		"description": "Query analytics, flags, and HogQL from the agent.",
+		"mcpUrl": "https://mcp.posthog.com/mcp",
+		"docsUrl": "https://posthog.com/docs/model-context-protocol",
+		"glyph": "Ph",
+		"scopes": []
+	},
+	{
+		"id": "paddle-mcp",
+		"label": "Paddle",
+		"description": "Inspect products, prices, and subscriptions from the agent.",
+		"mcpUrl": "https://mcp.paddle.com/mcp",
+		"docsUrl": "https://developer.paddle.com/sdks/ai/paddle-mcp",
+		"glyph": "Pd",
+		"scopes": [
+			"openid",
+			"profile",
+			"email"
+		]
+	},
+	{
+		"id": "prismic-mcp",
+		"label": "Prismic",
+		"description": "Search and draft repository content from the agent.",
+		"mcpUrl": "https://mcp.prismic.io/mcp",
+		"docsUrl": "https://prismic.io/docs/mcp",
+		"glyph": "Pr",
+		"scopes": []
+	},
+	{
+		"id": "replicate-mcp",
+		"label": "Replicate",
+		"description": "Run and inspect models from the agent.",
+		"mcpUrl": "https://mcp.replicate.com/mcp",
+		"docsUrl": "https://replicate.com/docs",
+		"glyph": "Rp",
+		"scopes": []
+	},
+	{
+		"id": "mixpanel-mcp",
+		"label": "Mixpanel",
+		"description": "Query product analytics from the agent.",
+		"mcpUrl": "https://mcp.mixpanel.com/mcp",
+		"docsUrl": "https://docs.mixpanel.com/",
+		"glyph": "Mx",
+		"scopes": []
+	},
+	{
+		"id": "algolia-mcp",
+		"label": "Algolia",
+		"description": "Search indexes and records from the agent.",
+		"mcpUrl": "https://mcp.algolia.com/mcp",
+		"docsUrl": "https://www.algolia.com/doc/",
+		"glyph": "Al",
+		"scopes": []
+	},
+	{
+		"id": "contentful-mcp",
+		"label": "Contentful",
+		"description": "Browse spaces and entries from the agent.",
+		"mcpUrl": "https://mcp.contentful.com/mcp",
+		"docsUrl": "https://www.contentful.com/developers/docs/",
+		"glyph": "Cf",
+		"scopes": []
+	},
+	{
+		"id": "mux-mcp",
+		"label": "Mux",
+		"description": "Inspect assets and streams from the agent.",
+		"mcpUrl": "https://mcp.mux.com",
+		"docsUrl": "https://www.mux.com/docs",
+		"glyph": "Mx",
+		"scopes": [
+			"openid",
+			"profile"
+		]
+	},
+	{
+		"id": "resend-mcp",
+		"label": "Resend",
+		"description": "Inspect domains and email activity from the agent.",
+		"mcpUrl": "https://mcp.resend.com",
+		"docsUrl": "https://resend.com/docs",
+		"glyph": "Re",
+		"scopes": [
+			"full_access"
+		]
+	},
+	{
+		"id": "upstash-mcp",
+		"label": "Upstash",
+		"description": "Inspect Redis and vector indexes from the agent.",
+		"mcpUrl": "https://mcp.upstash.com/mcp",
+		"docsUrl": "https://upstash.com/docs",
+		"glyph": "Up",
+		"scopes": [
+			"openid",
+			"profile",
+			"email"
+		]
+	},
+	{
+		"id": "cloudflare-mcp",
+		"label": "Cloudflare",
+		"description": "Inspect Workers, KV, and account resources from the agent.",
+		"mcpUrl": "https://mcp.cloudflare.com/mcp",
+		"docsUrl": "https://developers.cloudflare.com/agents/model-context-protocol/",
+		"glyph": "Cf",
+		"scopes": []
+	},
+	{
+		"id": "dinero",
+		"label": "Dinero",
+		"description": "Read books, invoices, and entries from Danish accounting.",
+		"mcpUrl": "https://mcp.dinero.dk/mcp",
+		"docsUrl": "https://dinero.dk/funktioner/mcp/",
+		"glyph": "Di",
+		"scopes": [
+			"dineropublicapi:read",
+			"dineropublicapi:write",
+			"offline_access"
+		]
+	},
+	{
+		"id": "sceneplane",
+		"label": "Sceneplane",
+		"description": "Cloud Blender: scenes, renders, and exports from the agent.",
+		"mcpUrl": "https://mcp.sceneplane.online/v1",
+		"docsUrl": "https://sceneplane.online",
+		"glyph": "Sp",
+		"scopes": [
+			"mcp:discover",
+			"projects:read",
+			"projects:write",
+			"renders:run",
+			"exports:run",
+			"jobs:read"
+		]
+	},
+	{
+		"id": "jira",
+		"label": "Jira",
+		"description": "Read and update Jira issues from the builder agent.",
+		"mcpUrl": "https://mcp.atlassian.com/v1/mcp",
+		"docsUrl": "https://support.atlassian.com/atlassian-rovo/docs/getting-started-with-the-atlassian-remote-mcp-server/",
+		"glyph": "Ji",
+		"scopes": []
+	},
+	{
+		"id": "airtable",
+		"label": "Airtable",
+		"description": "Query bases as structured content for the agent.",
+		"mcpUrl": "https://mcp.airtable.com",
+		"docsUrl": "https://airtable.com/developers/web/api/mcp",
+		"glyph": "At",
+		"scopes": [
+			"data.records:read",
+			"schema.bases:read"
+		]
+	},
+	{
+		"id": "miro",
+		"label": "Miro",
+		"description": "Boards and sticky notes for moodboards and IA.",
+		"mcpUrl": "https://mcp.miro.com/",
+		"docsUrl": "https://developers.miro.com/docs/miro-mcp",
+		"glyph": "Mi",
+		"scopes": [
+			"boards:read",
+			"boards:write"
+		]
+	},
+	{
+		"id": "webflow",
+		"label": "Webflow",
+		"description": "CMS collections and site structure for migrations.",
+		"mcpUrl": "https://mcp.webflow.com",
+		"docsUrl": "https://developers.webflow.com/data/v2.0.0/docs/mcp-server",
+		"glyph": "Wf",
+		"scopes": []
+	},
+	{
+		"id": "vercel",
+		"label": "Vercel",
+		"description": "Projects, deployments, and env inspection for the agent.",
+		"mcpUrl": "https://mcp.vercel.com/",
+		"docsUrl": "https://vercel.com/docs/mcp/vercel-mcp",
+		"glyph": "▲",
+		"scopes": [
+			"openid"
+		]
+	},
+	{
+		"id": "gitlab",
+		"label": "GitLab",
+		"description": "Issues, merge requests, and repo search.",
+		"mcpUrl": "https://gitlab.com/api/v4/mcp",
+		"docsUrl": "https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/",
+		"glyph": "Gl",
+		"scopes": [
+			"mcp"
+		]
+	},
+	{
+		"id": "monday",
+		"label": "monday.com",
+		"description": "Boards and items as a planning source.",
+		"mcpUrl": "https://mcp.monday.com/mcp",
+		"docsUrl": "https://developer.monday.com/api-reference/docs/mcp",
+		"glyph": "Mo",
+		"scopes": []
+	}
+]

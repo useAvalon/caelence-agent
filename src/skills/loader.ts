@@ -1,0 +1,162 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { Glob } from "bun";
+import { shouldSkipDir } from "../tools/paths.ts";
+
+export interface Skill {
+	name: string;
+	description: string;
+	body: string;
+	path: string;
+	relPath: string;
+	source: "bundled" | "host" | "user";
+}
+
+export function stripFrontmatter(md: string): { attrs: Record<string, string>; body: string } {
+	const trimmed = md.replace(/^\uFEFF/, "");
+	if (!trimmed.startsWith("---")) return { attrs: {}, body: trimmed.trim() };
+	const end = trimmed.indexOf("\n---", 3);
+	if (end < 0) return { attrs: {}, body: trimmed.trim() };
+	const raw = trimmed.slice(3, end).replace(/^\n/, "");
+	const body = trimmed
+		.slice(end + 4)
+		.replace(/^\s*\n/, "")
+		.trim();
+	return { attrs: parseFrontmatter(raw), body };
+}
+
+function parseFrontmatter(raw: string): Record<string, string> {
+	const attrs: Record<string, string> = {};
+	const lines = raw.split("\n");
+	let i = 0;
+	while (i < lines.length) {
+		const line = lines[i] ?? "";
+		const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+		if (!match) {
+			i += 1;
+			continue;
+		}
+		const key = match[1] ?? "";
+		let value = (match[2] ?? "").trim();
+		if (value === ">" || value === ">|" || value === ">-" || value === "|" || value === "|-") {
+			const folded: string[] = [];
+			i += 1;
+			while (i < lines.length) {
+				const next = lines[i] ?? "";
+				if (/^[A-Za-z0-9_-]+:\s*/.test(next) && !/^\s/.test(next)) break;
+				folded.push(next.replace(/^\s{2,}/, ""));
+				i += 1;
+			}
+			attrs[key] = folded.join(" ").replace(/\s+/g, " ").trim();
+			continue;
+		}
+		if (
+			(value.startsWith('"') && value.endsWith('"')) ||
+			(value.startsWith("'") && value.endsWith("'"))
+		) {
+			value = value.slice(1, -1);
+		}
+		attrs[key] = value;
+		i += 1;
+	}
+	return attrs;
+}
+
+export function parseSkillMarkdown(md: string, absPath: string, root: string): Skill {
+	const { attrs, body } = stripFrontmatter(md);
+	const name = attrs.name?.trim() || dirname(absPath).split("/").pop() || "skill";
+	const description = attrs.description?.trim() || "";
+	return {
+		name,
+		description,
+		body,
+		path: absPath,
+		relPath: relative(root, absPath).split("\\").join("/"),
+		source: "host",
+	};
+}
+
+export function bundledSkillsDir(): string {
+	return join(import.meta.dir, "..", "..", "skills");
+}
+
+/** Later writers win. Used to overlay host skills on a catalog or user store. */
+export function mergeSkills(first: Skill[], host: Skill[]): Skill[] {
+	const byName = new Map<string, Skill>();
+	for (const skill of first) byName.set(skill.name.toLowerCase(), skill);
+	for (const skill of host) byName.set(skill.name.toLowerCase(), { ...skill, source: "host" });
+	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Skills shipped with the package. Not loaded until `/skill add`. */
+export function listBundledSkills(): Skill[] {
+	return loadSkills(bundledSkillsDir()).map((skill) => ({ ...skill, source: "bundled" as const }));
+}
+
+/** Extra folders we read so a host is not locked to Cursor. Writes still go to config.skillsDir. */
+export const CONVENTIONAL_HOST_SKILL_DIRS = ["skills", ".cursor/skills", ".claude/skills"] as const;
+
+export function resolveHostSkillDirs(cwd: string, configured: string): string[] {
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const rel of [configured, ...CONVENTIONAL_HOST_SKILL_DIRS]) {
+		const abs = resolve(cwd, rel);
+		if (seen.has(abs)) continue;
+		seen.add(abs);
+		if (existsSync(abs)) out.push(abs);
+	}
+	if (out.length === 0) out.push(resolve(cwd, configured));
+	return out;
+}
+
+export function loadMergedSkills(hostSkillsDir: string | string[], userDir?: string): Skill[] {
+	const dirs = Array.isArray(hostSkillsDir) ? hostSkillsDir : [hostSkillsDir];
+	const byName = new Map<string, Skill>();
+	if (userDir) {
+		for (const skill of loadSkills(userDir)) {
+			byName.set(skill.name.toLowerCase(), { ...skill, source: "user" });
+		}
+	}
+	for (const dir of dirs) {
+		for (const skill of loadSkills(dir)) {
+			byName.set(skill.name.toLowerCase(), { ...skill, source: "host" });
+		}
+	}
+	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function loadSkills(skillsDir: string): Skill[] {
+	const skills: Skill[] = [];
+	try {
+		const glob = new Glob("**/SKILL.md");
+		for (const rel of glob.scanSync({ cwd: skillsDir, onlyFiles: true, dot: false })) {
+			const parts = rel.split("/");
+			if (parts.some((p) => shouldSkipDir(p))) continue;
+			const abs = join(skillsDir, rel);
+			const md = readFileSync(abs, "utf8");
+			skills.push(parseSkillMarkdown(md, abs, skillsDir));
+		}
+	} catch {
+		return [];
+	}
+	skills.sort((a, b) => a.name.localeCompare(b.name));
+	return skills;
+}
+
+export function skillCatalogPrompt(skills: Skill[]): string {
+	if (skills.length === 0) return "";
+	const lines = skills.map((s) => `- ${s.name} (${s.source})`);
+	return [
+		"## Skills",
+		"Skills are instruction files, not tools. When a task matches a name, read it with read_skill. Do not list or quote these unless the user asks.",
+		...lines,
+	].join("\n");
+}
+
+export function skillBodiesForNames(skills: Skill[], names: string[]): string {
+	const wanted = new Set(names.map((n) => n.trim().toLowerCase()));
+	return skills
+		.filter((s) => wanted.has(s.name.toLowerCase()))
+		.map((s) => `# Skill: ${s.name}\n\n${s.body}`)
+		.join("\n\n");
+}

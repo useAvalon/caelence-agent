@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Caelence agent window",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:window:allow-close", "allow-bridge-info", "allow-open-url", "allow-open-path", "allow-mic"]
+}

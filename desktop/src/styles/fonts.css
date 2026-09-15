@@ -1,0 +1,53 @@
+/* Self-hosted variable faces, WKWebView-safe.
+   One family per file. No unicode-range (latin-ext also ships U+0020;
+   WebKit then paints two spaces and drops the advance).
+   Discrete weights, not `400 700`, so it does not composite two masters.
+   `block` not `swap`: swap leaves system-ui and the webfont both visible. */
+
+@font-face {
+	font-family: "Instrument Sans";
+	src: url("./fonts/instrument-sans-latin-wght-normal.ttf") format("truetype");
+	font-weight: 400;
+	font-style: normal;
+	font-display: block;
+}
+
+@font-face {
+	font-family: "Instrument Sans";
+	src: url("./fonts/instrument-sans-latin-wght-normal.ttf") format("truetype");
+	font-weight: 500;
+	font-style: normal;
+	font-display: block;
+}
+
+@font-face {
+	font-family: "Instrument Sans";
+	src: url("./fonts/instrument-sans-latin-wght-normal.ttf") format("truetype");
+	font-weight: 600;
+	font-style: normal;
+	font-display: block;
+}
+
+@font-face {
+	font-family: "Instrument Sans";
+	src: url("./fonts/instrument-sans-latin-wght-normal.ttf") format("truetype");
+	font-weight: 700;
+	font-style: normal;
+	font-display: block;
+}
+
+@font-face {
+	font-family: "Chivo Mono";
+	src: url("./fonts/chivo-mono-latin-wght-normal.ttf") format("truetype");
+	font-weight: 400;
+	font-style: normal;
+	font-display: block;
+}
+
+@font-face {
+	font-family: "Chivo Mono";
+	src: url("./fonts/chivo-mono-latin-wght-normal.ttf") format("truetype");
+	font-weight: 500;
+	font-style: normal;
+	font-display: block;
+}

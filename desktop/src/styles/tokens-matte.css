@@ -1,0 +1,354 @@
+/* ============================================================
+   Caelence tokens — matte system
+   Green primary, no red, no orange accent. Two neutral families
+   used for different jobs. Import first, before any component CSS.
+   ============================================================ */
+
+:root {
+	/* ---------- GREEN · the brand ---------- */
+	--g-50: #f2f5e6; /* wash, hover beds */
+	--g-100: #e4ebca; /* tint fill */
+	--g-200: #cddaa4; /* icon tile background */
+	--g-400: #afc378;
+	--g-500: #9bb35b; /* the logo green. fills, icons, marks */
+	--g-600: #89a04b; /* hover on fills */
+	--g-700: #667a33; /* buttons and any white text on green */
+	--g-800: #4f5f26; /* pressed, dark surfaces */
+
+	/* white on --g-700 is roughly 4.9:1 and passes AA.
+     white on --g-600 is 3.6:1 and does not.
+     Never put white on --g-500 or lighter: use --ink instead. */
+
+	/* ---------- SAND · warm neutrals ---------- */
+	/* Pages, cards, canvas beds. The default surface family. */
+	--s-25: #fdfcf8;
+	--s-50: #f8f6f0;
+	--s-100: #f3f0e8; /* your sand */
+	--s-200: #e8e3d6;
+	--s-300: #d8d2c2;
+
+	/* ---------- GREY · cool neutrals ---------- */
+	/* Rulers, grids, measurement chrome, UI in product scenes.
+     Deliberately a different temperature from sand: the warm
+     family is paper, the cool family is instrument. */
+	--n-50: #f8f8f8;
+	--n-100: #eeeeee; /* your light grey */
+	--n-200: #e4e4e4;
+	--n-300: #d9d9d9; /* your mid grey */
+	--n-400: #b6b4ae;
+	--n-500: #93918b;
+	--n-600: #72726e;
+
+	/* ---------- INK ---------- */
+	--k-700: #4e4d4b;
+	--k-800: #363635;
+	--k-850: #292929; /* dark surfaces */
+	--k-900: #212227; /* deepest surface */
+	--k-950: #1a1a19;
+	--ink: var(--k-900);
+	--subtle: #a8a49f;
+
+	/* ---------- RED · stop ---------- */
+	--r-50: #fbeeec;
+	--r-100: #f4d6d2;
+	--r-500: #d9584b; /* icons, marks, borders */
+	--r-600: #c44a3e;
+	--r-700: #b23f33; /* buttons, and red text on a light surface */
+	--r-800: #8e3228;
+
+	/* ---------- ORANGE · attention ---------- */
+	--o-50: #fdf4e4;
+	--o-100: #f8e3be;
+	--o-500: #e0a03c; /* icons, marks, badge fills with dark text */
+	--o-600: #c98a2c;
+	--o-700: #8f6420; /* orange text on a light surface */
+
+	/* ---------- BLUE · instrument ---------- */
+	--b-50: #edf2f7;
+	--b-100: #c8d8e6; /* ruler highlight, soft measurement fill */
+	--b-500: #7e97ae;
+	--b-600: #6e93b8; /* selection outlines, active handles */
+	--b-700: #4e6b87; /* blue text on a light surface */
+
+	/* ---------- PURPLE · people ---------- */
+	--p-50: #f1eff5;
+	--p-100: #dcd6e5;
+	--p-500: #9a8fae; /* presence, cursors, comments */
+	--p-700: #6b6083;
+
+	/* ============================================================
+     ROLES · what each colour is allowed to mean
+     Use these aliases in components. Never reach past them to a
+     raw ramp step, because that is how intent drifts.
+     ============================================================ */
+
+	/* brand and action.
+     Four button levels. Ink is the workhorse, green is the
+     exception. One green button per screen, maximum. If a screen
+     seems to need two, one of them is not primary. */
+	--action: var(--g-700); /* PRIMARY fill. white label */
+	--action-hover: var(--g-800);
+	--action-fg: #ffffff;
+
+	--action-2: var(--k-900); /* SECONDARY fill. the workhorse */
+	--action-2-hover: var(--k-800);
+	--action-2-fg: var(--s-25);
+
+	--action-3-border: var(--n-300); /* TERTIARY. hairline, no fill */
+	--action-3-hover: var(--ink);
+	--action-3-fg: var(--ink);
+
+	/* QUIET is text plus arrow. No token needed, no border, no fill. */
+
+	--brand: var(--g-500); /* logo, marks, icon tiles */
+	--brand-tint: var(--g-200);
+	--brand-glyph: var(--g-800); /* darkened mark on --brand-tint */
+
+	/* Category glyphs in the asset list only. Never a row or tile fill. */
+	--m-blue: var(--b-500);
+	--m-purple: var(--p-500);
+
+	/* progress and completion. Both green, separated by motion:
+     in-progress is green that MOVES, done is green that does not.
+     Never show a static green fill for something still running. */
+	--running: var(--g-500); /* travelling dash, pulsing ring */
+	--done: var(--g-700); /* check glyph, completed step */
+	--done-bg: var(--g-50);
+
+	/* instrument. Blue is never an action and never a status. */
+	--measure: var(--b-600); /* selection outline, active handle */
+	--measure-soft: var(--b-100); /* ruler highlight band */
+	--edit: var(--b-600); /* edit mode, resize, snap guides */
+
+	/* people */
+	--presence: var(--p-500); /* cursors, avatars, comment pins */
+	--presence-deep: var(--p-700); /* avatar fill that carries a light label */
+
+	/* status */
+	--danger: var(--r-700); /* destructive button, error text */
+	--danger-mark: var(--r-500); /* trash icon, error dot, border */
+	--danger-bg: var(--r-50);
+	--danger-fill: var(--r-700); /* destructive fill. white label */
+	--danger-fg: #ffffff;
+	--warning: var(--o-500); /* warning icon, badge fill */
+	--warning-text: var(--o-700); /* warning text on a light surface */
+	--warning-bg: var(--o-50);
+	--info: var(--b-700);
+	--info-bg: var(--b-50);
+
+	/* ---------- CONTRAST FACTS ---------- */
+	/* Checked, not assumed. White text passes only on:
+       --g-700  4.9:1     --r-700  5.8:1
+       --b-700  5.5:1     --p-700  5.8:1
+     White FAILS on --g-500, --g-600, --r-500, --o-500, --o-600,
+     --b-500, --b-600 and --p-500.
+     --o-500 takes --ink at about 6.9:1 and is the correct way to
+     use orange as a fill. Orange never carries white. */
+
+	/* ---------- SEMANTIC ---------- */
+	--bg: var(--s-50);
+	--bg-sand: var(--s-100);
+	/* Canvas beds: one step deeper than --bg-sand so cream page frames read as cards. */
+	--bg-canvas: var(--s-200);
+	--card: var(--s-25);
+	--bg-inset: var(--n-100); /* recessed: wells, code, icon tiles */
+	--line: var(--n-200);
+	--line-2: var(--n-300);
+	--rule: var(--n-400); /* rulers and measurement lines */
+	--text: var(--ink);
+	--text-secondary: var(--n-600);
+	--text-tertiary: var(--n-500);
+
+	/* ---------- ICONS ---------- */
+	/* Phosphor. Light at 20px and up, Regular at 16px and below.
+     One weight per context. Never line mixed with filled or duotone.
+     Default --icon. Role colour only when the icon carries that role.
+     The tile takes the colour, never the row behind it. */
+	--icon: var(--n-600);
+	--icon-hover: var(--ink);
+	--icon-tile: 38px;
+	--icon-glyph: 19px;
+	--r-tile: 9px;
+
+	/* ---------- HANDLES ---------- */
+	/* Always round. Never square. The dot is the same object at
+     every scale: rule intersections, selection corners, connection
+     ends, bezier points. */
+	--handle: 9px;
+	--handle-sm: 7px;
+	--handle-ring: 1.6px;
+
+	/* ---------- SHAPE ---------- */
+	--r-sm: 4px;
+	--r-md: 8px;
+	--r-lg: 12px;
+	--r-full: 999px;
+	--gutter: 40px;
+	--container: 1200px;
+	--section: 96px;
+
+	/* ---------- TYPE ---------- */
+	--sans: "Instrument Sans", system-ui, sans-serif;
+	--mono: "Chivo Mono", ui-monospace, monospace;
+}
+
+/* ============================================================
+   DARK
+   Follows the system preference by default; an explicit user
+   choice overrides it. See the delivery block at the end.
+
+   The VALUES are not an inversion of the light palette. The sand
+   family has no dark equivalent, --g-700 collapses to 3.3:1 and
+   stops working as a button, red needs lifting and orange does
+   not. Each token was measured against the surface it actually
+   sits on. Only this semantic block changes; no component branches
+   on theme.
+   ============================================================ */
+:root[data-theme="dark"] {
+	/* surfaces */
+	--bg: #1a1a19; /* page. the deepest step */
+	--bg-sand: #232321; /* paper: canvas beds, work surfaces */
+	--bg-canvas: #1e1e1c; /* board behind page frames; cards lift on top */
+	--card: #292929; /* raised: panels, cards, nav */
+	--bg-inset: #212227; /* recessed: wells, code blocks */
+
+	/* lines. two steps, because one is never enough on dark */
+	--line: #34343a; /* default separation */
+	--line-2: #43434a; /* interactive borders, hover */
+	--rule: #55555c; /* rulers, ticks, measurement chrome */
+
+	/* text. all four pass on every surface above */
+	--text: #f6f4ee;
+	--text-secondary: #b6b4ae;
+	--text-tertiary: #93918b;
+
+	/* green. --g-700 is only 3.3:1 on --card and must not carry
+     small text or act as a button fill here. On dark the button
+     inverts: brand green fill, ink label at 7.5:1. */
+	--brand: var(--g-500); /* 6.8:1 on --card */
+	--brand-glyph: var(--g-500); /* lifted so the tile mark reads on --brand-tint */
+	--action: var(--g-500);
+	--action-hover: var(--g-400);
+	--action-fg: #1a1a19; /* dark label on green, not white */
+	--action-2: #f6f4ee;
+	--action-2-hover: #e8e3d6;
+	--action-2-fg: #1a1a19;
+	--action-3-border: var(--line-2);
+	--action-3-hover: var(--text);
+	--action-3-fg: var(--text);
+	--brand-tint: #2e3521; /* icon tile bed */
+	--running: var(--g-400);
+	--done: var(--g-400);
+	--done-bg: #23291a;
+
+	/* status. red is the one that needs lifting: --r-500 is 4.1:1
+     on --card, so small red text uses --r-400. */
+	--danger: #e4796e; /* lifted for text */
+	--danger-mark: var(--r-500); /* icons and borders only */
+	--danger-bg: #2e1e1c;
+	--danger-fill: var(--r-700); /* keep the 700 fill so --danger-fg stays white */
+	--danger-fg: #ffffff;
+	--warning: var(--o-500); /* 7.0:1, no lift needed */
+	--warning-text: var(--o-500);
+	--warning-bg: #2e2519;
+	--info: var(--b-500);
+	--info-bg: #1e2429;
+
+	/* instrument */
+	--measure: var(--b-500); /* 5.2:1 on --card */
+	--measure-soft: #2a3641;
+	--edit: var(--b-500);
+	--presence: var(--p-500); /* 5.2:1 */
+	--presence-deep: var(--p-700);
+
+	/* icons. --n-400 is 7.5:1 on --card but Light-weight 19px strokes
+     still read dim; lift toward --text for chrome glyphs. */
+	--icon: #d0cec6;
+	--icon-hover: var(--text);
+}
+
+/* ---------- dark rules that are not colours ----------
+
+   1. The logo keeps #9BB35B. Never the lifted green. It is 6.8:1
+      on --card and needs no help.
+   2. Elevation inverts. On light, floating layers get a shadow.
+      On dark, shadows are invisible: a floating layer lifts by
+      going one step lighter (--card over --bg) plus a --line-2
+      border. Keep the shadow tokens for depth on top of that,
+      never as the only signal.
+   3. Grain drops from 5.5% to about 3%. Noise reads roughly twice
+      as strong on a dark field and turns to visible dirt.
+   4. Hairlines need more contrast, not less. A 1px --line on dark
+      disappears at 100% zoom on some panels; that is what --line-2
+      is for.
+   5. The canvas dot grid uses --rule at 40% opacity, not --line.
+      A dot field tuned for sand vanishes on ink.
+   6. Green fills stay rare, same as light. In progress moves,
+      done is still. The motion rule is theme-independent.
+   ------------------------------------------------------------ */
+
+/* Same values, applied when the system asks for dark and the user
+   has not chosen otherwise. Keep the two blocks identical: if you
+   change one, change the other. */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #1a1a19;
+		--bg-sand: #232321;
+		--bg-canvas: #1e1e1c;
+		--card: #292929;
+		--bg-inset: #212227;
+		--line: #34343a;
+		--line-2: #43434a;
+		--rule: #55555c;
+		--text: #f6f4ee;
+		--text-secondary: #b6b4ae;
+		--text-tertiary: #93918b;
+		--brand: var(--g-500);
+		--brand-glyph: var(--g-500);
+		--action: var(--g-500);
+		--action-hover: var(--g-400);
+		--action-fg: #1a1a19;
+		--brand-tint: #2e3521;
+		--action-2: #f6f4ee;
+		--action-2-hover: #e8e3d6;
+		--action-2-fg: #1a1a19;
+		--action-3-border: #43434a;
+		--action-3-hover: #f6f4ee;
+		--action-3-fg: #f6f4ee;
+		--running: var(--g-400);
+		--done: var(--g-400);
+		--done-bg: #23291a;
+		--danger: #e4796e;
+		--danger-mark: var(--r-500);
+		--danger-bg: #2e1e1c;
+		--danger-fill: var(--r-700);
+		--danger-fg: #ffffff;
+		--warning: var(--o-500);
+		--warning-text: var(--o-500);
+		--warning-bg: #2e2519;
+		--info: var(--b-500);
+		--info-bg: #1e2429;
+		--measure: var(--b-500);
+		--measure-soft: #2a3641;
+		--edit: var(--b-500);
+		--presence: var(--p-500);
+		--presence-deep: var(--p-700);
+		--icon: #d0cec6;
+		--icon-hover: var(--text);
+	}
+}
+
+/* Tells the browser to theme its own UI: form controls, scrollbars,
+   spellcheck underlines, the lot. Without this they stay light on a
+   dark page, which is the most common dark-mode oversight. */
+:root {
+	color-scheme: light;
+}
+:root[data-theme="dark"] {
+	color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		color-scheme: dark;
+	}
+}

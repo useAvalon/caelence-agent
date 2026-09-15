@@ -1,0 +1,62 @@
+{
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"indentWidth": 2,
+		"lineWidth": 100
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"complexity": {
+				"noCommaOperator": "off"
+			},
+			"style": {
+				"noNonNullAssertion": "off",
+				"useTemplate": "warn",
+				"useNodejsImportProtocol": "warn"
+			},
+			"suspicious": {
+				"noExplicitAny": "warn",
+				"noArrayIndexKey": "off",
+				"noConfusingVoidType": "off"
+			},
+			"a11y": {
+				"useMediaCaption": "off"
+			},
+			"correctness": {
+				"noUnusedFunctionParameters": "warn",
+				"useExhaustiveDependencies": "off"
+			}
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "double"
+		}
+	},
+	"files": {
+		"includes": [
+			"src/**/*.ts",
+			"src/**/*.tsx",
+			"bin/**/*.ts",
+			"desktop/src/**/*.ts",
+			"desktop/src/**/*.tsx",
+			"scripts/**/*.mjs",
+			"examples/**/*.ts"
+		]
+	}
+}

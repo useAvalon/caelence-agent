@@ -1,0 +1,729 @@
+import { randomBytes } from "node:crypto";
+import { mediaModelLabel } from "../cli/media-models.ts";
+import { HARNESS_MODELS, modelPickerItems } from "../cli/models.ts";
+import { cachedLiveTargetNames, loadLiveTargetNames } from "../cli/openrouter-live.ts";
+import { cachedModalityModels } from "../cli/openrouter-modality.ts";
+import { sessionPickerItems } from "../cli/picker.ts";
+import { isHelpAlias } from "../cli/slash.ts";
+import { applyPickerChoice, isSlashPickerKind, runSlashLine } from "../cli/slash-dispatch.ts";
+import { resolveOpenRouter } from "../config.ts";
+import type { ApprovalRequest } from "../core/approval.ts";
+import type { AgentEvent } from "../core/events.ts";
+import { tryParseAgentMode } from "../core/mode.ts";
+import { normalizeSessionTitle, type Session, sessionTranscript } from "../core/session.ts";
+import { formatUsage } from "../core/usage.ts";
+import {
+	connectMcp,
+	type OAuthCallback,
+	oauthResultPage,
+	openSystemBrowser,
+} from "../integrations/connect.ts";
+import { readProviderOAuth, writeProviderOAuth } from "../integrations/oauth-clients.ts";
+import { listPublicIntegrations, removeConnection } from "../integrations/store.ts";
+import { transcribeAudio } from "../media/openrouter-generate.ts";
+import { readMediaPrefs } from "../media/prefs.ts";
+import { PRODUCT_NAME } from "../product.ts";
+import { createHarness, type HarnessRuntime } from "../runtime.ts";
+import { openResolvedPath, resolveLocalPath } from "./open-local.ts";
+import { readPreviewCache, writePreviewCache } from "./preview-cache.ts";
+import { applyStoredOpenRouterKey, maskSecret, writeOpenRouterKey } from "./secrets.ts";
+
+export interface DesktopState {
+	name: string;
+	cwd: string;
+	mode: string;
+	modelId: string;
+	modelLabel: string;
+	modelTarget?: string;
+	imageModelId: string;
+	imageModelLabel: string;
+	videoModelId: string;
+	videoModelLabel: string;
+	transcribeModelId: string;
+	transcribeModelLabel: string;
+	sessionId?: string;
+	title: string;
+	spend?: string;
+	skills: Array<{ name: string; source: string }>;
+	busy: boolean;
+	hasApiKey: boolean;
+}
+
+export interface BridgeReady {
+	url: string;
+	token: string;
+	port: number;
+}
+
+export interface StartDesktopBridgeOptions {
+	cwd: string;
+	host?: string;
+	port?: number;
+	token?: string;
+	harness?: HarnessRuntime;
+	openUrl?: (url: string) => void;
+	openPath?: (path: string, reveal: boolean) => void;
+}
+
+const CORS_HEADERS = {
+	"access-control-allow-origin": "*",
+	"access-control-allow-headers": "authorization, content-type",
+	"access-control-allow-methods": "GET, POST, OPTIONS",
+};
+
+function modelLabel(id: string): string {
+	return HARNESS_MODELS.find((model) => model.id === id)?.label ?? id;
+}
+
+function settingsPayload(harness: HarnessRuntime) {
+	const google = readProviderOAuth("google");
+	const microsoft = readProviderOAuth("microsoft");
+	return {
+		hasApiKey: harness.hasApiKey,
+		apiKeyHint: harness.hasApiKey ? maskSecret(process.env.OPENROUTER_API_KEY ?? "") : "",
+		mode: harness.mode,
+		modelId: harness.modelId,
+		modelLabel: modelLabel(harness.modelId),
+		hasGoogleOAuth: Boolean(google?.clientId),
+		googleOAuthHint: google?.clientId ? maskSecret(google.clientId) : "",
+		hasMicrosoftOAuth: Boolean(microsoft?.clientId),
+		microsoftOAuthHint: microsoft?.clientId ? maskSecret(microsoft.clientId) : "",
+	};
+}
+
+function saveProviderOAuth(body: Record<string, unknown>, kind: "google" | "microsoft"): void {
+	const idKey = kind === "google" ? "googleClientId" : "microsoftClientId";
+	const secretKey = kind === "google" ? "googleClientSecret" : "microsoftClientSecret";
+	const clientId = typeof body[idKey] === "string" ? body[idKey].trim() : "";
+	const clientSecret = typeof body[secretKey] === "string" ? body[secretKey].trim() : "";
+	if (!clientId && !clientSecret) return;
+	writeProviderOAuth(kind, {
+		...(clientId ? { clientId } : {}),
+		...(clientSecret ? { clientSecret } : {}),
+	});
+}
+
+function chatMessages(session: Session | undefined) {
+	return session ? sessionTranscript(session) : [];
+}
+
+function json(data: unknown, status = 200, extra?: HeadersInit): Response {
+	return new Response(JSON.stringify(data), {
+		status,
+		headers: {
+			"content-type": "application/json",
+			...CORS_HEADERS,
+			...extra,
+		},
+	});
+}
+
+function readToken(req: Request): string | undefined {
+	const header = req.headers.get("authorization");
+	if (header?.startsWith("Bearer ")) return header.slice("Bearer ".length).trim();
+	return new URL(req.url).searchParams.get("token") ?? undefined;
+}
+
+function parseHttpUrl(raw: string): URL | null {
+	try {
+		const parsed = new URL(raw.trim());
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+		return parsed;
+	} catch {
+		return null;
+	}
+}
+
+function publicHttpHref(raw: string): string | null {
+	const href = raw.trim();
+	const parsed = parseHttpUrl(href);
+	if (!parsed) return null;
+	const host = parsed.hostname.toLowerCase();
+	if (
+		host === "localhost" ||
+		host === "127.0.0.1" ||
+		host === "[::1]" ||
+		host === "::1" ||
+		host.endsWith(".local")
+	) {
+		return null;
+	}
+	return href;
+}
+
+async function fetchPreview(href: string): Promise<Response> {
+	const cached = readPreviewCache(href);
+	if (cached) return previewBytes(cached.type, cached.bytes);
+
+	const remote = await fetch(href, {
+		headers: {
+			Accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*,*/*;q=0.8",
+			Referer: "https://www.canva.com/",
+			"User-Agent":
+				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+		},
+		redirect: "follow",
+		signal: AbortSignal.timeout(15_000),
+	});
+	if (!remote.ok) {
+		const fallback = readPreviewCache(href);
+		if (fallback) return previewBytes(fallback.type, fallback.bytes);
+		return json({ error: `Preview fetch failed (${remote.status}).` }, 502);
+	}
+	const type =
+		(remote.headers.get("content-type") ?? "application/octet-stream").split(";")[0]?.trim() ??
+		"application/octet-stream";
+	if (!type.startsWith("image/") && type !== "application/pdf") {
+		const fallback = readPreviewCache(href);
+		if (fallback) return previewBytes(fallback.type, fallback.bytes);
+		return json({ error: "Preview is not an image." }, 502);
+	}
+	const buffer = await remote.arrayBuffer();
+	if (buffer.byteLength > 8 * 1024 * 1024) {
+		return json({ error: "Preview is larger than 8 MB." }, 413);
+	}
+	const bytes = new Uint8Array(buffer);
+	writePreviewCache(href, type, bytes);
+	return previewBytes(type, bytes);
+}
+
+function previewBytes(type: string, bytes: Uint8Array): Response {
+	return new Response(Buffer.from(bytes), {
+		status: 200,
+		headers: {
+			"content-type": type,
+			"cache-control": "private, max-age=3600",
+			...CORS_HEADERS,
+		},
+	});
+}
+
+async function readJson(req: Request): Promise<Record<string, unknown>> {
+	const text = await req.text();
+	if (!text.trim()) return {};
+	const parsed = JSON.parse(text) as unknown;
+	return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+}
+
+function snapshot(harness: HarnessRuntime, busy: boolean, title: string): DesktopState {
+	const live = cachedLiveTargetNames();
+	const target = live.get(harness.modelId);
+	const prefs = readMediaPrefs();
+	return {
+		name: harness.config.name,
+		cwd: harness.cwd,
+		mode: harness.mode,
+		modelId: harness.modelId,
+		modelLabel: modelLabel(harness.modelId),
+		...(target && target.toLowerCase() !== modelLabel(harness.modelId).toLowerCase()
+			? { modelTarget: target }
+			: {}),
+		imageModelId: prefs.imageModel,
+		imageModelLabel: mediaModelLabel(cachedModalityModels("image"), prefs.imageModel),
+		videoModelId: prefs.videoModel,
+		videoModelLabel: mediaModelLabel(cachedModalityModels("video"), prefs.videoModel),
+		transcribeModelId: prefs.transcribeModel,
+		transcribeModelLabel: mediaModelLabel(
+			cachedModalityModels("transcription"),
+			prefs.transcribeModel,
+		),
+		sessionId: harness.activeSessionId,
+		title,
+		spend: harness.spend ? formatUsage(harness.spend) : undefined,
+		skills: harness.skills.map((skill) => ({ name: skill.name, source: skill.source })),
+		busy,
+		hasApiKey: harness.hasApiKey,
+	};
+}
+
+export async function startDesktopBridge(options: StartDesktopBridgeOptions): Promise<{
+	ready: BridgeReady;
+	stop: () => Promise<void>;
+}> {
+	const host = options.host ?? "127.0.0.1";
+	const token = options.token ?? randomBytes(24).toString("hex");
+	const openUrl = options.openUrl ?? openSystemBrowser;
+	if (!options.harness) applyStoredOpenRouterKey();
+	const harness = options.harness ?? (await createHarness({ cwd: options.cwd }));
+	const openPath =
+		options.openPath ??
+		((path: string, reveal: boolean) => {
+			const resolved = resolveLocalPath(path, harness.cwd);
+			if (!resolved) throw new Error("File is missing.");
+			openResolvedPath(resolved, reveal);
+		});
+	const ownsHarness = !options.harness;
+	let title = "New chat";
+	let busy = false;
+	let abort: AbortController | undefined;
+	const pending = new Map<string, (ok: boolean) => void>();
+	const oauthWaiters = new Map<string, (result: OAuthCallback) => void>();
+
+	const refreshLiveNames = (): void => {
+		if (!harness.hasApiKey) return;
+		void loadLiveTargetNames(resolveOpenRouter(harness.config));
+	};
+	refreshLiveNames();
+
+	const applySession = async (id: string): Promise<{ ok: boolean; error?: string }> => {
+		const session = await harness.store.get(id);
+		if (!session) return { ok: false, error: `No session ${id}` };
+		harness.setSession(session.id);
+		if (session.model) harness.setModel(session.model);
+		title = session.title.trim() || "New chat";
+		return { ok: true };
+	};
+
+	const server = Bun.serve({
+		hostname: host,
+		port: options.port ?? 0,
+		idleTimeout: 0,
+		async fetch(req) {
+			if (req.method === "OPTIONS") {
+				return new Response(null, { status: 204, headers: CORS_HEADERS });
+			}
+			const url = new URL(req.url);
+			const path = url.pathname;
+
+			if (req.method === "GET" && path === "/oauth/callback") {
+				const state = url.searchParams.get("state")?.trim() ?? "";
+				const code = url.searchParams.get("code")?.trim() ?? "";
+				const error = url.searchParams.get("error")?.trim() ?? "";
+				const resolve = oauthWaiters.get(state);
+				if (!resolve) {
+					return new Response(
+						oauthResultPage(
+							false,
+							"This sign-in is no longer waiting. Close this tab and try Connect again.",
+						),
+						{
+							status: 400,
+							headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+						},
+					);
+				}
+				oauthWaiters.delete(state);
+				resolve({ code: code || undefined, error: error || undefined });
+				const ok = Boolean(code) && !error;
+				return new Response(
+					oauthResultPage(
+						ok,
+						ok
+							? "You can close this tab and return to Caelence agent."
+							: "Close this tab and try Connect again.",
+					),
+					{
+						status: ok ? 200 : 400,
+						headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+					},
+				);
+			}
+
+			if (readToken(req) !== token) {
+				return json({ error: `Unauthorized. Restart ${PRODUCT_NAME}.` }, 401);
+			}
+
+			if (req.method === "GET" && path === "/health") {
+				return json({ ok: true });
+			}
+			if (req.method === "GET" && path === "/state") {
+				return json(snapshot(harness, busy, title));
+			}
+			if (req.method === "GET" && path === "/sessions") {
+				return json({ items: sessionPickerItems(await harness.store.list()) });
+			}
+			if (req.method === "GET" && path === "/models") {
+				return json({ items: modelPickerItems(harness.modelId, cachedLiveTargetNames()) });
+			}
+			if (req.method === "GET" && path === "/settings") {
+				return json(settingsPayload(harness));
+			}
+
+			if (req.method === "GET" && path === "/integrations") {
+				return json({ items: listPublicIntegrations() });
+			}
+
+			if (req.method === "POST" && path === "/integrations/connect") {
+				const body = await readJson(req);
+				const connectorId = typeof body.connectorId === "string" ? body.connectorId.trim() : "";
+				if (!connectorId) return json({ error: "connectorId is required." }, 400);
+				const redirectUri = `http://127.0.0.1:${url.port}/oauth/callback`;
+				try {
+					await connectMcp({
+						connectorId,
+						redirectUri,
+						waitForCallback: (state) =>
+							new Promise<OAuthCallback>((resolve, reject) => {
+								const timer = setTimeout(() => {
+									oauthWaiters.delete(state);
+									reject(new Error("Sign-in timed out. Try Connect again."));
+								}, 180_000);
+								oauthWaiters.set(state, (result) => {
+									clearTimeout(timer);
+									resolve(result);
+								});
+							}),
+					});
+					await harness.reloadIntegrations();
+					return json({ ok: true, items: listPublicIntegrations() });
+				} catch (err) {
+					return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+				}
+			}
+
+			if (req.method === "POST" && path === "/integrations/disconnect") {
+				const body = await readJson(req);
+				const connectorId = typeof body.connectorId === "string" ? body.connectorId.trim() : "";
+				if (!connectorId) return json({ error: "connectorId is required." }, 400);
+				removeConnection(connectorId);
+				await harness.reloadIntegrations();
+				return json({ ok: true, items: listPublicIntegrations() });
+			}
+
+			if (req.method === "POST" && path === "/open") {
+				const body = await readJson(req);
+				const parsed = parseHttpUrl(typeof body.url === "string" ? body.url : "");
+				if (!parsed) return json({ error: "Only http and https links can open." }, 400);
+				openUrl(parsed.toString());
+				return json({ ok: true });
+			}
+
+			if (req.method === "POST" && path === "/open-path") {
+				const body = await readJson(req);
+				const filePath = typeof body.path === "string" ? body.path.trim() : "";
+				if (!filePath) return json({ error: "Path is missing." }, 400);
+				try {
+					openPath(filePath, body.reveal === true);
+					return json({ ok: true });
+				} catch (err) {
+					return json(
+						{ error: err instanceof Error ? err.message : "Could not open the file." },
+						400,
+					);
+				}
+			}
+
+			if (req.method === "POST" && path === "/embed") {
+				const body = await readJson(req);
+				const href = publicHttpHref(typeof body.url === "string" ? body.url : "");
+				if (!href) return json({ error: "Only public http and https URLs can embed." }, 400);
+				try {
+					return await fetchPreview(href);
+				} catch (err) {
+					return json({ error: err instanceof Error ? err.message : "Preview fetch failed." }, 502);
+				}
+			}
+
+			if (req.method === "GET" && path === "/embed") {
+				const href = publicHttpHref(url.searchParams.get("url") ?? "");
+				if (!href) return json({ error: "Only public http and https URLs can embed." }, 400);
+				try {
+					return await fetchPreview(href);
+				} catch (err) {
+					return json({ error: err instanceof Error ? err.message : "Preview fetch failed." }, 502);
+				}
+			}
+
+			if (req.method === "POST" && path === "/transcribe") {
+				if (!harness.hasApiKey) {
+					return json({ error: "OpenRouter API key is missing. Add it in Settings." }, 400);
+				}
+				const body = await readJson(req);
+				const data = typeof body.data === "string" ? body.data : "";
+				const format = typeof body.format === "string" ? body.format.trim() : "webm";
+				if (!data) return json({ error: "Recording is empty." }, 400);
+				if (data.length > 25_000_000) return json({ error: "Recording is too large." }, 413);
+				try {
+					const or = resolveOpenRouter(harness.config);
+					const text = await transcribeAudio({
+						data,
+						format: format || "webm",
+						model: readMediaPrefs().transcribeModel,
+						apiKey: or.apiKey,
+						baseUrl: or.baseUrl,
+					});
+					return json({ text });
+				} catch (err) {
+					return json({ error: err instanceof Error ? err.message : "Transcription failed." }, 502);
+				}
+			}
+
+			if (req.method === "POST" && path === "/settings") {
+				const body = await readJson(req);
+				if (typeof body.apiKey === "string") {
+					writeOpenRouterKey(body.apiKey);
+					harness.setApiKey(body.apiKey);
+					refreshLiveNames();
+				}
+				if (typeof body.mode === "string") {
+					const next = tryParseAgentMode(body.mode);
+					if (!next) return json({ error: "Mode is ask, plan, or agent." }, 400);
+					harness.setMode(next);
+				}
+				if (typeof body.modelId === "string" && body.modelId.trim()) {
+					harness.setModel(body.modelId.trim());
+				}
+				saveProviderOAuth(body, "google");
+				saveProviderOAuth(body, "microsoft");
+				return json({
+					ok: true,
+					...settingsPayload(harness),
+					state: snapshot(harness, busy, title),
+				});
+			}
+
+			if (req.method === "GET" && path === "/slash") {
+				const { filterSlashCommands } = await import("../cli/slash.ts");
+				return json({ items: filterSlashCommands(url.searchParams.get("q") ?? "/") });
+			}
+
+			if (req.method === "POST" && path === "/session") {
+				const body = await readJson(req);
+				if (body.clear === true) {
+					harness.setSession(undefined);
+					title = "New chat";
+					return json({ ok: true, state: snapshot(harness, busy, title) });
+				}
+				const id = typeof body.id === "string" ? body.id.trim() : "";
+				if (typeof body.title === "string") {
+					if (!id) return json({ error: "Session id is required." }, 400);
+					const nextTitle = normalizeSessionTitle(body.title);
+					if (!nextTitle) return json({ error: "Title is empty." }, 400);
+					const session = await harness.store.get(id);
+					if (!session) return json({ error: `No session ${id}` }, 404);
+					const next = await harness.store.setTitle(session, nextTitle);
+					if (harness.activeSessionId === id) title = next.title;
+					return json({ ok: true, title: next.title, state: snapshot(harness, busy, title) });
+				}
+				if (body.delete === true) {
+					if (!id) return json({ error: "Session id is required." }, 400);
+					if (busy && harness.activeSessionId === id) {
+						return json({ error: "A turn is already running." }, 409);
+					}
+					const wasActive = harness.activeSessionId === id;
+					const removed = await harness.store.remove(id);
+					if (!removed) return json({ error: `No session ${id}` }, 404);
+					if (wasActive) {
+						harness.setSession(undefined);
+						title = "New chat";
+					}
+					return json({
+						ok: true,
+						cleared: wasActive,
+						state: snapshot(harness, busy, title),
+					});
+				}
+				const result = await applySession(id);
+				if (!result.ok) return json({ error: result.error }, 404);
+				const session = await harness.store.get(id);
+				return json({
+					ok: true,
+					state: snapshot(harness, busy, title),
+					messages: chatMessages(session),
+				});
+			}
+
+			if (req.method === "POST" && path === "/model") {
+				const body = await readJson(req);
+				const id = typeof body.id === "string" ? body.id.trim() : "";
+				if (!id) return json({ error: "Model id is required." }, 400);
+				harness.setModel(id);
+				return json({ ok: true, state: snapshot(harness, busy, title) });
+			}
+
+			if (req.method === "POST" && path === "/mode") {
+				const body = await readJson(req);
+				const next = tryParseAgentMode(typeof body.mode === "string" ? body.mode : undefined);
+				if (!next) return json({ error: "Mode is ask, plan, or agent." }, 400);
+				harness.setMode(next);
+				return json({ ok: true, state: snapshot(harness, busy, title) });
+			}
+
+			if (req.method === "POST" && path === "/slash") {
+				const body = await readJson(req);
+				const raw = typeof body.raw === "string" ? body.raw : "";
+				if (!raw.trim()) return json({ error: "Command is empty." }, 400);
+				const outcome = await runSlashLine(harness, raw);
+				if (outcome.kind === "clear") title = "New chat";
+				if (outcome.kind === "session") {
+					harness.setSession(outcome.session.id);
+					if (outcome.session.model) harness.setModel(outcome.session.model);
+					title = outcome.session.title.trim() || "New chat";
+				}
+				return json({ outcome, state: snapshot(harness, busy, title) });
+			}
+
+			if (req.method === "POST" && path === "/picker") {
+				const body = await readJson(req);
+				const picker = isSlashPickerKind(body.picker) ? body.picker : undefined;
+				const id = typeof body.id === "string" ? body.id : "";
+				if (!picker || !id) return json({ error: "Picker choice is incomplete." }, 400);
+				const result = applyPickerChoice(harness, picker, id);
+				if (result.kind === "session-id") {
+					const applied = await applySession(result.id);
+					if (!applied.ok) return json({ error: applied.error }, 404);
+					const session = await harness.store.get(result.id);
+					return json({
+						ok: true,
+						state: snapshot(harness, busy, title),
+						messages: chatMessages(session),
+					});
+				}
+				return json({
+					ok: true,
+					state: snapshot(harness, busy, title),
+					...(result.kind === "text" ? { text: result.text } : {}),
+				});
+			}
+
+			if (req.method === "POST" && path === "/approve") {
+				const body = await readJson(req);
+				const callId = typeof body.callId === "string" ? body.callId : "";
+				const decision = body.decision;
+				const resolve = pending.get(callId);
+				if (!resolve) return json({ error: "No approval is waiting." }, 404);
+				if (decision === "always")
+					harness.allowRiskyAlways(typeof body.toolName === "string" ? body.toolName : "exec");
+				pending.delete(callId);
+				resolve(decision === "yes" || decision === "always");
+				return json({ ok: true });
+			}
+
+			if (req.method === "POST" && path === "/abort") {
+				abort?.abort();
+				for (const resolve of pending.values()) resolve(false);
+				pending.clear();
+				return json({ ok: true });
+			}
+
+			if (req.method === "POST" && path === "/turn") {
+				if (busy) return json({ error: "A turn is already running." }, 409);
+				const body = await readJson(req);
+				const message = typeof body.message === "string" ? body.message : "";
+				if (!message.trim()) return json({ error: "Message is empty." }, 400);
+				const editUserTurn =
+					typeof body.editUserTurn === "number" &&
+					Number.isInteger(body.editUserTurn) &&
+					body.editUserTurn >= 0
+						? body.editUserTurn
+						: undefined;
+				if (editUserTurn === undefined && isHelpAlias(message)) {
+					const outcome = await runSlashLine(harness, "/help");
+					return json({ outcome, state: snapshot(harness, busy, title) });
+				}
+				if (editUserTurn === undefined && message.trim().startsWith("/")) {
+					const outcome = await runSlashLine(harness, message);
+					if (outcome.kind === "clear") title = "New chat";
+					if (outcome.kind === "session") {
+						harness.setSession(outcome.session.id);
+						if (outcome.session.model) harness.setModel(outcome.session.model);
+						title = outcome.session.title.trim() || "New chat";
+					}
+					return json({ outcome, state: snapshot(harness, busy, title) });
+				}
+
+				busy = true;
+				abort = new AbortController();
+				const encoder = new TextEncoder();
+				const stream = new ReadableStream<Uint8Array>({
+					start(controller) {
+						let heartbeat: ReturnType<typeof setInterval> | undefined;
+						const send = (event: AgentEvent) => {
+							if (event.kind === "session_meta") title = event.title;
+							try {
+								controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+							} catch {
+								abort?.abort();
+							}
+						};
+						heartbeat = setInterval(() => {
+							try {
+								controller.enqueue(encoder.encode(": \n\n"));
+							} catch {
+								if (heartbeat) clearInterval(heartbeat);
+							}
+						}, 4_000);
+						void harness
+							.runTurn(message, send, {
+								signal: abort?.signal,
+								approvalAsk: (req: ApprovalRequest) =>
+									new Promise<boolean>((resolve) => {
+										pending.set(req.callId, resolve);
+									}),
+								...(editUserTurn !== undefined ? { editUserTurn } : {}),
+							})
+							.catch((err) => {
+								send({
+									kind: "error",
+									message: err instanceof Error ? err.message : String(err),
+								});
+							})
+							.finally(() => {
+								if (heartbeat) clearInterval(heartbeat);
+								busy = false;
+								abort = undefined;
+								pending.clear();
+								try {
+									controller.close();
+								} catch {
+									// already cancelled by the client
+								}
+							});
+					},
+					cancel() {
+						abort?.abort();
+					},
+				});
+				return new Response(stream, {
+					headers: {
+						"content-type": "text/event-stream",
+						"cache-control": "no-cache",
+						...CORS_HEADERS,
+					},
+				});
+			}
+
+			return json({ error: "Not found." }, 404);
+		},
+	});
+
+	const port = server.port;
+	if (port === undefined) {
+		server.stop(true);
+		throw new Error(`${PRODUCT_NAME} did not bind a local port.`);
+	}
+	const ready: BridgeReady = {
+		url: `http://${host}:${port}`,
+		token,
+		port,
+	};
+
+	return {
+		ready,
+		stop: async () => {
+			abort?.abort();
+			for (const resolve of pending.values()) resolve(false);
+			pending.clear();
+			for (const resolve of oauthWaiters.values()) resolve({ error: "cancelled" });
+			oauthWaiters.clear();
+			server.stop(true);
+			if (ownsHarness) {
+				harness.close();
+				await harness.observability.shutdown();
+			}
+		},
+	};
+}
+
+export async function main(): Promise<void> {
+	const cwd = process.env.HARNESS_CWD?.trim() || process.cwd();
+	const { ready } = await startDesktopBridge({ cwd });
+	process.stdout.write(`HARNESS_READY=${JSON.stringify(ready)}\n`);
+}
+
+if (import.meta.main) {
+	main().catch((err) => {
+		process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+		process.exit(1);
+	});
+}

@@ -1,0 +1,158 @@
+name: Release
+
+# Manual workflow for publishing beta, rc, and stable releases.
+# Auto-detects the semver bump from conventional commit messages since the last
+# release tag; use bump-override to force a specific bump. Requires an NPM_TOKEN
+# repository secret with publish rights to the package.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump-override:
+        description: "Version bump (auto = detect from commits)"
+        required: true
+        type: choice
+        default: auto
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+      channel:
+        description: "Release channel"
+        required: true
+        type: choice
+        options:
+          - stable
+          - beta
+          - rc
+      dry-run:
+        description: "Dry run (no publish/tag)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  # A real (non-dry-run) publish needs an NPM_TOKEN secret. Detect it so a real
+  # release without the token skips with a clear notice instead of failing deep
+  # in the publish step. Dry runs always proceed.
+  guard:
+    name: Check npm token
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NPM_TOKEN secret is not set — only dry-run releases can proceed."
+          fi
+
+  release:
+    name: Release (${{ inputs.channel }})
+    needs: guard
+    if: ${{ inputs.dry-run == true || needs.guard.outputs.enabled == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run check:exports
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Detect semver bump
+        id: detect
+        run: |
+          OVERRIDE="${{ inputs.bump-override }}"
+          if [ "$OVERRIDE" != "auto" ]; then
+            echo "bump=$OVERRIDE" >> "$GITHUB_OUTPUT"
+            echo "::notice::Bump: $OVERRIDE (manual override)"
+            exit 0
+          fi
+          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+          if [ -z "$LAST_TAG" ]; then
+            RANGE=""
+            echo "::notice::No previous tag; scanning all commits."
+          else
+            RANGE="${LAST_TAG}..HEAD"
+            echo "::notice::Last tag: $LAST_TAG"
+          fi
+          SUBJECTS=$(git log $RANGE --format='%s')
+          BODIES=$(git log $RANGE --format='%B')
+          BUMP="patch"
+          if echo "$BODIES" | grep -qiE '^BREAKING[ -]CHANGE:' \
+            || echo "$SUBJECTS" | grep -qE '^(feat|fix|chore|refactor|perf|build|ci|docs|style|test|revert)(\(.*\))?!:'; then
+            BUMP="major"
+          elif echo "$SUBJECTS" | grep -qE '^feat(\(.*\))?:'; then
+            BUMP="minor"
+          fi
+          if [ -z "$LAST_TAG" ] && [ "$BUMP" = "patch" ]; then
+            BUMP="minor"
+          fi
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "::notice::Detected bump: $BUMP"
+
+      - name: Bump version
+        id: version
+        run: |
+          BUMP="${{ steps.detect.outputs.bump }}"
+          CHANNEL="${{ inputs.channel }}"
+          if [ "$CHANNEL" = "stable" ]; then
+            NEW=$(npm version "$BUMP" --no-git-tag-version)
+          else
+            NEW=$(npm version "pre${BUMP}" --preid="$CHANNEL" --no-git-tag-version)
+          fi
+          echo "version=${NEW#v}" >> "$GITHUB_OUTPUT"
+          echo "::notice::New version: ${NEW}"
+
+      - name: Publish to npm
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          TAG="${{ inputs.channel }}"
+          [ "$TAG" = "stable" ] && TAG="latest"
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            echo "[DRY RUN] npm publish --tag $TAG"
+            npm publish --dry-run --tag "$TAG"
+          else
+            npm publish --tag "$TAG" --access public
+          fi
+
+      - name: Commit, tag, and GitHub Release
+        if: ${{ inputs.dry-run == false }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v${VERSION}"
+          git add package.json bun.lock 2>/dev/null || git add package.json
+          git commit -m "release: v${VERSION} [skip ci]"
+          git push
+          git tag "$TAG"
+          git push origin "$TAG"
+          PRERELEASE=""
+          [ "${{ inputs.channel }}" != "stable" ] && PRERELEASE="--prerelease"
+          gh release create "$TAG" --title "v${VERSION}" --generate-notes $PRERELEASE

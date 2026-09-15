@@ -1,0 +1,258 @@
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { Glob } from "bun";
+import {
+	createMcpServer,
+	errorResult,
+	jsonResult,
+	type McpServer,
+	type McpToolDefinition,
+	textResult,
+} from "../core/mcp.ts";
+import { PathEscapeError, resolveUnderCwd, shouldSkipDir, toProjectRel } from "./paths.ts";
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const EXEC_TIMEOUT_MS = 120_000;
+
+function asString(value: unknown): string {
+	return typeof value === "string" ? value : "";
+}
+
+async function readUtf8(abs: string): Promise<string> {
+	const info = await stat(abs);
+	if (!info.isFile()) throw new Error(`Not a file: ${abs}`);
+	if (info.size > MAX_FILE_BYTES) throw new Error(`File exceeds ${MAX_FILE_BYTES} bytes`);
+	return readFile(abs, "utf8");
+}
+
+export interface LocalToolsOptions {
+	cwd: string;
+}
+
+export function createLocalTools(options: LocalToolsOptions): McpServer {
+	const cwd = options.cwd;
+
+	const tools: McpToolDefinition[] = [
+		{
+			name: "read_file",
+			description:
+				"Read a UTF-8 file under the project root. Prefer this over exec for inspecting source.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					path: { type: "string", description: "Project-relative file path." },
+				},
+				required: ["path"],
+			},
+			async handler(raw) {
+				try {
+					const abs = resolveUnderCwd(cwd, asString(raw.path));
+					const content = await readUtf8(abs);
+					return textResult(content);
+				} catch (err) {
+					return errorResult(err instanceof Error ? err.message : String(err));
+				}
+			},
+		},
+		{
+			name: "write_file",
+			description:
+				"Create or overwrite a whole file under the project root (up to 10 MB). Prefer edit_file for a small change.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					path: { type: "string", description: "Project-relative file path." },
+					content: { type: "string", description: "UTF-8 file contents." },
+				},
+				required: ["path", "content"],
+			},
+			async handler(raw) {
+				try {
+					const abs = resolveUnderCwd(cwd, asString(raw.path));
+					const content = asString(raw.content);
+					if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) {
+						return errorResult(`File exceeds ${MAX_FILE_BYTES} bytes`);
+					}
+					await mkdir(dirname(abs), { recursive: true });
+					await writeFile(abs, content, "utf8");
+					return jsonResult({
+						path: toProjectRel(cwd, abs),
+						bytes: Buffer.byteLength(content, "utf8"),
+					});
+				} catch (err) {
+					return errorResult(err instanceof Error ? err.message : String(err));
+				}
+			},
+		},
+		{
+			name: "edit_file",
+			description:
+				"Replace an exact snippet in an existing file. old_str must match uniquely unless replace_all is true.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					path: { type: "string", description: "Project-relative path of an existing file." },
+					old_str: { type: "string", description: "Exact snippet to replace." },
+					new_str: { type: "string", description: "Replacement snippet." },
+					replace_all: {
+						type: "boolean",
+						description: "Replace every occurrence (default false).",
+					},
+				},
+				required: ["path", "old_str", "new_str"],
+			},
+			async handler(raw) {
+				try {
+					const abs = resolveUnderCwd(cwd, asString(raw.path));
+					const oldStr = asString(raw.old_str);
+					const newStr = asString(raw.new_str);
+					if (!oldStr) return errorResult("old_str is empty");
+					const original = await readUtf8(abs);
+					const replaceAll = raw.replace_all === true;
+					if (!original.includes(oldStr)) {
+						return errorResult("old_str was not found in the file");
+					}
+					if (!replaceAll) {
+						const first = original.indexOf(oldStr);
+						const second = original.indexOf(oldStr, first + oldStr.length);
+						if (second >= 0) {
+							return errorResult(
+								"old_str matches more than once; pass replace_all or a unique snippet",
+							);
+						}
+					}
+					const next = replaceAll
+						? original.split(oldStr).join(newStr)
+						: original.replace(oldStr, newStr);
+					await writeFile(abs, next, "utf8");
+					return jsonResult({ path: toProjectRel(cwd, abs), replaced: replaceAll ? "all" : "one" });
+				} catch (err) {
+					return errorResult(err instanceof Error ? err.message : String(err));
+				}
+			},
+		},
+		{
+			name: "glob",
+			description: "List project-relative file paths matching a glob pattern (e.g. **/*.ts).",
+			inputSchema: {
+				type: "object",
+				properties: {
+					pattern: { type: "string", description: "Glob pattern relative to the project root." },
+				},
+				required: ["pattern"],
+			},
+			async handler(raw) {
+				try {
+					const pattern = asString(raw.pattern) || "**/*";
+					const glob = new Glob(pattern);
+					const matches: string[] = [];
+					for await (const path of glob.scan({ cwd, onlyFiles: true, dot: false })) {
+						const parts = path.split("/");
+						if (parts.some((p) => shouldSkipDir(p))) continue;
+						matches.push(path);
+						if (matches.length >= 500) break;
+					}
+					matches.sort();
+					return jsonResult({ pattern, matches, truncated: matches.length >= 500 });
+				} catch (err) {
+					return errorResult(err instanceof Error ? err.message : String(err));
+				}
+			},
+		},
+		{
+			name: "grep",
+			description: "Search file contents under the project root. Prefer this over exec for search.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					pattern: { type: "string", description: "Literal substring or regex." },
+					glob: { type: "string", description: "Optional file glob (default **/*)." },
+					regex: { type: "boolean", description: "Treat pattern as a regular expression." },
+					max_matches: { type: "number", description: "Cap on matches (default 100)." },
+				},
+				required: ["pattern"],
+			},
+			async handler(raw) {
+				try {
+					const pattern = asString(raw.pattern);
+					if (!pattern) return errorResult("pattern is empty");
+					const fileGlob = asString(raw.glob) || "**/*";
+					const maxMatches = typeof raw.max_matches === "number" ? raw.max_matches : 100;
+					const useRegex = raw.regex === true;
+					const re = useRegex ? new RegExp(pattern) : null;
+					const hits: Array<{ path: string; line: number; text: string }> = [];
+					const glob = new Glob(fileGlob);
+					for await (const rel of glob.scan({ cwd, onlyFiles: true, dot: false })) {
+						const parts = rel.split("/");
+						if (parts.some((p) => shouldSkipDir(p))) continue;
+						let content: string;
+						try {
+							content = await readFile(join(cwd, rel), "utf8");
+						} catch {
+							continue;
+						}
+						const lines = content.split("\n");
+						for (let i = 0; i < lines.length; i++) {
+							const line = lines[i] ?? "";
+							const ok = re ? re.test(line) : line.includes(pattern);
+							if (!ok) continue;
+							hits.push({ path: rel, line: i + 1, text: line.slice(0, 240) });
+							if (hits.length >= maxMatches) {
+								return jsonResult({ pattern, hits, truncated: true });
+							}
+						}
+					}
+					return jsonResult({ pattern, hits, truncated: false });
+				} catch (err) {
+					return errorResult(err instanceof Error ? err.message : String(err));
+				}
+			},
+		},
+		{
+			name: "exec",
+			description:
+				"Run a shell command in the project root. Times out after 120 seconds. Do not use exec to read or search files.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					command: { type: "string", description: "The shell command to run." },
+					cwd: { type: "string", description: "Optional project-relative working directory." },
+				},
+				required: ["command"],
+			},
+			async handler(raw) {
+				try {
+					const command = asString(raw.command);
+					if (!command.trim()) return errorResult("command is empty");
+					let workdir = cwd;
+					if (typeof raw.cwd === "string" && raw.cwd.trim()) {
+						workdir = resolveUnderCwd(cwd, raw.cwd);
+					}
+					const proc = Bun.spawn(["/bin/sh", "-lc", command], {
+						cwd: workdir,
+						stdout: "pipe",
+						stderr: "pipe",
+					});
+					const timer = setTimeout(() => proc.kill(), EXEC_TIMEOUT_MS);
+					const [stdout, stderr, exit] = await Promise.all([
+						new Response(proc.stdout).text(),
+						new Response(proc.stderr).text(),
+						proc.exited,
+					]);
+					clearTimeout(timer);
+					const payload = {
+						exit,
+						stdout: stdout.slice(0, 32_000),
+						stderr: stderr.slice(0, 32_000),
+					};
+					return jsonResult(payload, exit !== 0);
+				} catch (err) {
+					if (err instanceof PathEscapeError) return errorResult(err.message);
+					return errorResult(err instanceof Error ? err.message : String(err));
+				}
+			},
+		},
+	];
+
+	return createMcpServer(tools);
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Caelence agent",
+  "version": "0.1.0",
+  "identifier": "studio.caelence.harness",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Caelence agent",
+        "width": 960,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 520
+      }
+    ],
+    "security": {
+      "csp": null,
+      "headers": {
+        "Permissions-Policy": "microphone=(self)"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "macOS": {
+      "entitlements": "Entitlements.plist"
+    },
+    "icon": [
+      "icons/icon.png",
+      "icons/16x16.png",
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/henry.w@example.net",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

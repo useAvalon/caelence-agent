@@ -1,0 +1,19 @@
+[[permission]]
+identifier = "allow-bridge-info"
+description = "Read the local harness bridge address"
+commands.allow = ["bridge_info"]
+
+[[permission]]
+identifier = "allow-open-url"
+description = "Open http and https links in the system browser"
+commands.allow = ["open_url"]
+
+[[permission]]
+identifier = "allow-open-path"
+description = "Open a local file or show it in the folder"
+commands.allow = ["open_path"]
+
+[[permission]]
+identifier = "allow-mic"
+description = "Record from the microphone for dictation"
+commands.allow = ["mic_start", "mic_stop"]
