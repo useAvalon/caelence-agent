@@ -1,16 +1,26 @@
 # Caelence agent
 
-A coding agent you run in a project. Terminal UI, local tools, and skills you can add or remove.
+A coding agent with a desktop window or a terminal UI. Local tools and skills you can add or remove.
 
 [`@useavalon/caelence-agent`](https://www.npmjs.com/package/@useavalon/caelence-agent) on npm. Needs [Bun](https://bun.sh) 1.2 or later.
 
 ## Get started
 
+Desktop — no project required:
+
 ```bash
 bun add -g @useavalon/caelence-agent
+export OPENROUTER_API_KEY=…
+harness desktop
+```
+
+`harness desktop` opens the OS window. You can also paste a key in Settings. The window needs [Rust](https://rustup.rs).
+
+Or the terminal in a project:
+
+```bash
 cd your-project
 bunx harness init
-export OPENROUTER_API_KEY=…
 harness
 ```
 
@@ -59,11 +69,11 @@ Set `OPENROUTER_API_KEY`. Optional: `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`. `
 
 ```
 harness                 Terminal UI
+harness desktop         Desktop window (needs Rust; no project required)
 harness --mode plan     Start in plan mode
 harness chat -m "…"     One-shot turn
 harness eval [name]     Run or list evals
 harness init            Scaffold host files
-harness desktop         Optional OS window (needs Rust)
 ```
 
 Type `/` in the terminal for the command list. Tab completes.
