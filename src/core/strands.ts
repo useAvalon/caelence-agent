@@ -154,6 +154,16 @@ export function constructOpenRouterProvider(options: {
 	maxTokens?: number;
 	sessionId?: () => string | undefined;
 }): MainModelProvider {
+	if (!options.apiKey.trim()) {
+		return {
+			kind: "openrouter",
+			modelId: options.model,
+			async *stream() {
+				yield { type: "error", message: "OPENROUTER_API_KEY is not set." };
+				yield { type: "done" };
+			},
+		};
+	}
 	let lastUsage: TokenUsage | undefined;
 	let reasoningSink: ((text: string) => void) | undefined;
 	const model = new OpenAIModel({
@@ -163,7 +173,6 @@ export function constructOpenRouterProvider(options: {
 		maxTokens: options.maxTokens ?? DEFAULT_MAIN_MODEL_MAX_TOKENS,
 		params: {
 			reasoning: { effort: "low", exclude: false },
-			stream_options: { include_usage: true },
 		},
 		clientConfig: {
 			baseURL: options.baseUrl.replace(/\/+$/, ""),

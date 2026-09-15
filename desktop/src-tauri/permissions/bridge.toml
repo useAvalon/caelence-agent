@@ -17,3 +17,8 @@ commands.allow = ["open_path"]
 identifier = "allow-mic"
 description = "Record from the microphone for dictation"
 commands.allow = ["mic_start", "mic_stop"]
+
+[[permission]]
+identifier = "allow-read-drop-file"
+description = "Read a dropped local file into the composer"
+commands.allow = ["read_drop_file"]

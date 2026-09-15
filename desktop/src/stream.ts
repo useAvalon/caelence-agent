@@ -1,10 +1,17 @@
 import type { AgentEvent } from "./api";
+import type { AttachmentPreview } from "./composer-files";
 import { inputFromPreview, toolLabel } from "./tool-label";
 
 export type ToolStatus = "running" | "ok" | "fail";
 
 export type StreamLine =
-	| { key: string; type: "user"; text: string; userTurnIndex: number }
+	| {
+			key: string;
+			type: "user";
+			text: string;
+			userTurnIndex: number;
+			attachments?: AttachmentPreview[];
+	  }
 	| { key: string; type: "assistant"; text: string }
 	| { key: string; type: "thought"; text: string }
 	| {

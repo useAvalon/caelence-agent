@@ -1,4 +1,6 @@
 import { ArrowUpRight } from "@phosphor-icons/react/dist/csr/ArrowUpRight";
+import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CaretUp } from "@phosphor-icons/react/dist/csr/CaretUp";
 import { Check } from "@phosphor-icons/react/dist/csr/Check";
 import { FolderSimple } from "@phosphor-icons/react/dist/csr/FolderSimple";
 import { Gear } from "@phosphor-icons/react/dist/csr/Gear";
@@ -24,6 +26,7 @@ import {
 	deleteSession,
 	disconnectIntegration,
 	embedPreview,
+	filesFromDroppedPaths,
 	getIntegrations,
 	getSessions,
 	getSettings,
@@ -47,6 +50,17 @@ import {
 	startTurn,
 	transcribe,
 } from "./api";
+import { AttachmentThumbs } from "./ComposerAttach";
+import {
+	type ComposerAttachment,
+	droppedPaths,
+	filesFromTransfer,
+	mergeAttachments,
+	releaseAttachment,
+	serializeComposerAttachments,
+	toAttachmentPreviews,
+	transferHasFiles,
+} from "./composer-files";
 import {
 	audioFormatFromMime,
 	blobToBase64,
@@ -118,6 +132,10 @@ function pickerSelectedId(kind: SlashPickerKind, current: DesktopState): string 
 	return undefined;
 }
 
+function titleCase(value: string): string {
+	return value ? `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}` : value;
+}
+
 function composerMediaMeta(current: DesktopState): string {
 	return [
 		current.imageModelLabel ? `Image ${current.imageModelLabel}` : null,
@@ -148,6 +166,14 @@ function writeSidebar(open: boolean): void {
 	localStorage.setItem("harness-sidebar", open ? "on" : "off");
 }
 
+function readMediaMeta(): boolean {
+	return localStorage.getItem("harness-media-meta") === "on";
+}
+
+function writeMediaMeta(open: boolean): void {
+	localStorage.setItem("harness-media-meta", open ? "on" : "off");
+}
+
 export function App(): React.ReactElement {
 	const [bridge, setBridge] = useState<BridgeClient | null>(null);
 	const [bootError, setBootError] = useState<string | null>(null);
@@ -159,6 +185,7 @@ export function App(): React.ReactElement {
 	const [view, setView] = useState<MainView>("chat");
 	const [theme, setTheme] = useState<ThemeChoice>(readTheme);
 	const [sideOpen, setSideOpen] = useState(readSidebar);
+	const [mediaOpen, setMediaOpen] = useState(readMediaMeta);
 	const [slashItems, setSlashItems] = useState<SlashCommand[]>([]);
 	const [slashIndex, setSlashIndex] = useState(0);
 	const [picker, setPicker] = useState<PickerState | null>(null);
@@ -171,8 +198,15 @@ export function App(): React.ReactElement {
 	const [editingUser, setEditingUser] = useState<{ index: number; text: string } | null>(null);
 	const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
 	const [notice, setNotice] = useState<{ text: string; id: number } | null>(null);
+	const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+	const [fileDrag, setFileDrag] = useState(false);
 	const transcriptRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const attachmentsRef = useRef<ComposerAttachment[]>([]);
+	const fileDragDepth = useRef(0);
+	const viewRef = useRef(view);
+	viewRef.current = view;
 	const pickerListRef = useRef<HTMLUListElement>(null);
 	const sessionMenuRef = useRef<HTMLDivElement>(null);
 	const renameInputRef = useRef<HTMLInputElement>(null);
@@ -182,6 +216,7 @@ export function App(): React.ReactElement {
 	const queueRef = useRef<QueuedMessage[]>([]);
 	const sendingRef = useRef(false);
 	const skipDrainRef = useRef(false);
+	attachmentsRef.current = attachments;
 
 	const slashOpen = view === "chat" && draft.startsWith("/") && !listening && status !== "picker";
 
@@ -192,6 +227,10 @@ export function App(): React.ReactElement {
 	useEffect(() => {
 		writeSidebar(sideOpen);
 	}, [sideOpen]);
+
+	useEffect(() => {
+		writeMediaMeta(mediaOpen);
+	}, [mediaOpen]);
 
 	const refreshSessions = useCallback(async (client: BridgeClient) => {
 		const result = await getSessions(client);
@@ -336,8 +375,96 @@ export function App(): React.ReactElement {
 		setQueue(next);
 	}, []);
 
+	const addFiles = useCallback(
+		(files: File[]) => {
+			if (files.length === 0) return;
+			const next = mergeAttachments(attachmentsRef.current, files);
+			if (next.rejected.length > 0) {
+				showNotice(`Could not add ${next.rejected.join(", ")}.`);
+			}
+			if (next.attachments === attachmentsRef.current) return;
+			attachmentsRef.current = next.attachments;
+			setAttachments(next.attachments);
+		},
+		[showNotice],
+	);
+
+	const ingestDropped = useCallback(
+		async (transfer: DataTransfer | null, extraPaths: string[] = []) => {
+			if (viewRef.current !== "chat") return;
+			const html = filesFromTransfer(transfer);
+			const usable = html.filter((file) => file.size > 0);
+			if (usable.length > 0) {
+				addFiles(usable);
+				return;
+			}
+			const paths = [...new Set([...extraPaths, ...droppedPaths(transfer)])];
+			if (paths.length === 0) {
+				if (html.length > 0) addFiles(html);
+				return;
+			}
+			try {
+				const files = await filesFromDroppedPaths(paths);
+				addFiles(files.length > 0 ? files : html);
+			} catch (err) {
+				noticeError(err);
+			}
+		},
+		[addFiles, noticeError],
+	);
+
+	const takeAttachments = useCallback((): ComposerAttachment[] => {
+		const items = attachmentsRef.current;
+		attachmentsRef.current = [];
+		setAttachments([]);
+		return items;
+	}, []);
+
+	const removeAttachment = useCallback((index: number) => {
+		setAttachments((current) => {
+			const item = current[index];
+			if (item) releaseAttachment(item);
+			return current.filter((_, at) => at !== index);
+		});
+	}, []);
+
+	const onFileDragEnter = useCallback(
+		(event: React.DragEvent) => {
+			if (view !== "chat" || !transferHasFiles(event.dataTransfer)) return;
+			event.preventDefault();
+			fileDragDepth.current += 1;
+			setFileDrag(true);
+		},
+		[view],
+	);
+
+	const onFileDragOver = useCallback((event: React.DragEvent) => {
+		if (!transferHasFiles(event.dataTransfer)) return;
+		event.preventDefault();
+		event.dataTransfer.dropEffect = "copy";
+	}, []);
+
+	const onFileDragLeave = useCallback((event: React.DragEvent) => {
+		if (!transferHasFiles(event.dataTransfer)) return;
+		event.preventDefault();
+		fileDragDepth.current = Math.max(0, fileDragDepth.current - 1);
+		if (fileDragDepth.current === 0) setFileDrag(false);
+	}, []);
+
+	const onFileDrop = useCallback(
+		(event: React.DragEvent) => {
+			if (view !== "chat" || !transferHasFiles(event.dataTransfer)) return;
+			event.preventDefault();
+			event.stopPropagation();
+			fileDragDepth.current = 0;
+			setFileDrag(false);
+			void ingestDropped(event.dataTransfer);
+		},
+		[ingestDropped, view],
+	);
+
 	const sendTurn = useCallback(
-		async (message: string, editUserTurn?: number) => {
+		async (message: string, editUserTurn?: number, files: ComposerAttachment[] = []) => {
 			if (!bridge) return;
 			sendingRef.current = true;
 			skipDrainRef.current = false;
@@ -345,6 +472,7 @@ export function App(): React.ReactElement {
 			try {
 				let current = message;
 				let edit = editUserTurn;
+				let pendingFiles = files;
 				while (true) {
 					const slash =
 						edit === undefined &&
@@ -370,6 +498,7 @@ export function App(): React.ReactElement {
 						}
 					} else {
 						const editIndex = edit;
+						const previews = toAttachmentPreviews(pendingFiles);
 						if (editIndex !== undefined) {
 							setLines((prev) => truncateAfterUserTurn(prev, editIndex, current));
 						} else {
@@ -380,12 +509,17 @@ export function App(): React.ReactElement {
 									type: "user",
 									text: current,
 									userTurnIndex: nextUserTurnIndex(prev),
+									...(previews.length > 0 ? { attachments: previews } : {}),
 								},
 							]);
 						}
 						setStatus("running");
 						try {
 							let finished = false;
+							const payload =
+								pendingFiles.length > 0
+									? await serializeComposerAttachments(pendingFiles)
+									: undefined;
 							await startTurn(
 								bridge,
 								current,
@@ -406,6 +540,7 @@ export function App(): React.ReactElement {
 								},
 								undefined,
 								edit,
+								payload,
 							);
 							if (!finished) {
 								setLines((prev) =>
@@ -436,6 +571,7 @@ export function App(): React.ReactElement {
 					queueRef.current = queueRef.current.slice(1);
 					setQueue(queueRef.current);
 					current = queued.text;
+					pendingFiles = queued.attachments ?? [];
 					edit = undefined;
 				}
 			} finally {
@@ -447,25 +583,44 @@ export function App(): React.ReactElement {
 		[applyOutcome, bridge, noticeError, refreshSessions, showNotice],
 	);
 
+	const openComposerPicker = useCallback(
+		async (kind: "model" | "mode") => {
+			if (
+				!bridge ||
+				listening ||
+				status === "boot" ||
+				status === "running" ||
+				status === "approval"
+			) {
+				return;
+			}
+			if (sendingRef.current) return;
+			await sendTurn(`/${kind}`);
+		},
+		[bridge, listening, sendTurn, status],
+	);
+
 	const submit = useCallback(async () => {
 		if (!bridge || listening || status === "picker" || status === "boot") return;
 		const message = draft.trim();
-		if (!message) return;
-		const slash = resolveSlashSubmit(message);
+		const files = attachmentsRef.current;
+		if (!message && files.length === 0) return;
+		const slash = message ? resolveSlashSubmit(message) : undefined;
 		if (slash?.action === "hold") return;
 		if (slash?.action === "complete") {
 			setDraft(slash.line);
 			return;
 		}
 		const toSend = slash?.action === "send" ? slash.line : message;
+		const pendingFiles = slash ? [] : takeAttachments();
 		setDraft("");
 		setView("chat");
 		if (status === "running" || status === "approval" || sendingRef.current) {
-			setQueueSync(enqueueMessage(queueRef.current, toSend, `q-${Date.now()}`));
+			setQueueSync(enqueueMessage(queueRef.current, toSend, `q-${Date.now()}`, pendingFiles));
 			return;
 		}
-		await sendTurn(toSend);
-	}, [bridge, draft, listening, sendTurn, setQueueSync, status]);
+		await sendTurn(toSend, undefined, pendingFiles);
+	}, [bridge, draft, listening, sendTurn, setQueueSync, status, takeAttachments]);
 
 	const stop = useCallback(async () => {
 		if (!bridge) return;
@@ -554,6 +709,16 @@ export function App(): React.ReactElement {
 		if (node instanceof HTMLElement) node.scrollIntoView({ block: "nearest" });
 	}, [picker]);
 
+	const releaseLinePreviews = useCallback((next: StreamLine[]) => {
+		setLines((prev) => {
+			for (const line of prev) {
+				if (line.type !== "user") continue;
+				for (const item of line.attachments ?? []) releaseAttachment(item);
+			}
+			return next;
+		});
+	}, []);
+
 	const openSession = useCallback(
 		async (id: string) => {
 			if (!bridge || status !== "idle") return;
@@ -564,9 +729,9 @@ export function App(): React.ReactElement {
 			setSessionMenu(null);
 			const loaded = await postSession(bridge, { id });
 			setState(loaded.state);
-			setLines(linesFromTranscript(loaded.messages ?? []));
+			releaseLinePreviews(linesFromTranscript(loaded.messages ?? []));
 		},
-		[bridge, setQueueSync, status],
+		[bridge, releaseLinePreviews, setQueueSync, status],
 	);
 
 	const newChat = useCallback(async () => {
@@ -578,8 +743,8 @@ export function App(): React.ReactElement {
 		setSessionMenu(null);
 		const next = await postSession(bridge, { clear: true });
 		setState(next.state);
-		setLines([]);
-	}, [bridge, setQueueSync, status]);
+		releaseLinePreviews([]);
+	}, [bridge, releaseLinePreviews, setQueueSync, status]);
 
 	const commitRename = useCallback(async () => {
 		if (!bridge || !renamingId) return;
@@ -604,7 +769,7 @@ export function App(): React.ReactElement {
 				const result = await deleteSession(bridge, id);
 				setState(result.state);
 				if (result.cleared) {
-					setLines([]);
+					releaseLinePreviews([]);
 					setQueueSync([]);
 					setEditingUser(null);
 				}
@@ -613,7 +778,7 @@ export function App(): React.ReactElement {
 				noticeError(err);
 			}
 		},
-		[bridge, noticeError, refreshSessions, setQueueSync],
+		[bridge, noticeError, refreshSessions, releaseLinePreviews, setQueueSync],
 	);
 
 	useLayoutEffect(() => {
@@ -764,15 +929,64 @@ export function App(): React.ReactElement {
 	}, [applySpoken, bridge, listening, showNotice, status]);
 
 	useEffect(() => {
+		const onOver = (event: DragEvent) => {
+			if (!transferHasFiles(event.dataTransfer)) return;
+			event.preventDefault();
+		};
+		const onDrop = (event: DragEvent) => {
+			if (!transferHasFiles(event.dataTransfer)) return;
+			event.preventDefault();
+			fileDragDepth.current = 0;
+			setFileDrag(false);
+			void ingestDropped(event.dataTransfer);
+		};
+		window.addEventListener("dragover", onOver);
+		window.addEventListener("drop", onDrop);
 		return () => {
+			window.removeEventListener("dragover", onOver);
+			window.removeEventListener("drop", onDrop);
 			const recorder = recorderRef.current;
 			if (recorder && recorder.state !== "inactive") recorder.stop();
 			if (dictationModeRef.current === "native") {
 				void micStop().catch(() => undefined);
 				dictationModeRef.current = null;
 			}
+			for (const item of attachmentsRef.current) releaseAttachment(item);
 		};
-	}, []);
+	}, [ingestDropped]);
+
+	useEffect(() => {
+		let cancelled = false;
+		let stop: (() => void) | undefined;
+		void (async () => {
+			try {
+				const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+				const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+					if (viewRef.current !== "chat") return;
+					if (event.payload.type === "enter" || event.payload.type === "over") {
+						setFileDrag(true);
+						return;
+					}
+					if (event.payload.type === "leave") {
+						setFileDrag(false);
+						return;
+					}
+					if (event.payload.type === "drop") {
+						setFileDrag(false);
+						void ingestDropped(null, event.payload.paths);
+					}
+				});
+				if (cancelled) unlisten();
+				else stop = unlisten;
+			} catch {
+				// Browser preview has no Tauri webview.
+			}
+		})();
+		return () => {
+			cancelled = true;
+			stop?.();
+		};
+	}, [ingestDropped]);
 
 	const onKeyDown = useCallback(
 		(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -975,21 +1189,20 @@ export function App(): React.ReactElement {
 				</button>
 			</aside>
 
-			<div className="desk-main">
+			<section
+				className={`desk-main${fileDrag && view === "chat" ? " is-file-drag" : ""}`}
+				aria-label="Chat"
+				onDragEnter={onFileDragEnter}
+				onDragOver={onFileDragOver}
+				onDragLeave={onFileDragLeave}
+				onDrop={onFileDrop}
+			>
 				<header className="desk-bar">
 					<div className="desk-id">
 						<h1>
 							{view === "settings" ? "Settings" : view === "integrations" ? "Integrations" : "Chat"}
 						</h1>
-						{view === "chat" ? (
-							<p>
-								{state.mode}
-								{" · "}
-								{state.modelLabel}
-								{state.modelTarget ? ` · ${state.modelTarget}` : ""}
-								{state.spend ? ` · ${state.spend}` : ""}
-							</p>
-						) : null}
+						{view === "chat" && state.spend ? <p>{state.spend}</p> : null}
 					</div>
 				</header>
 
@@ -1006,7 +1219,7 @@ export function App(): React.ReactElement {
 				) : (
 					<div className="desk-transcript" ref={transcriptRef}>
 						{lines.length === 0 && !thoughtPending ? (
-							<p className="desk-hint">Type a message or / for commands</p>
+							<p className="desk-hint">Type a message, drop files, or / for commands</p>
 						) : (
 							<>
 								{transcriptBlocks.map((block, index) => {
@@ -1094,8 +1307,24 @@ export function App(): React.ReactElement {
 
 				{view === "chat" ? (
 					<footer className="desk-composer">
+						{fileDrag ? <p className="desk-composer__drop">Drop files to attach</p> : null}
 						{view === "chat" && mediaMeta ? (
-							<p className="desk-composer__meta">{mediaMeta}</p>
+							<div className={`desk-composer__meta${mediaOpen ? "" : " is-min"}`}>
+								{mediaOpen ? <p>{mediaMeta}</p> : null}
+								<button
+									type="button"
+									className="desk-composer__meta-toggle"
+									aria-expanded={mediaOpen}
+									aria-label={mediaOpen ? "Hide media models" : "Show media models"}
+									onClick={() => setMediaOpen((open) => !open)}
+								>
+									{mediaOpen ? (
+										<CaretUp size={14} weight="bold" />
+									) : (
+										<CaretDown size={14} weight="bold" />
+									)}
+								</button>
+							</div>
 						) : null}
 						{queue.length > 0 ? (
 							<ul className="desk-queue" aria-label="Queued messages">
@@ -1127,13 +1356,18 @@ export function App(): React.ReactElement {
 												}}
 											/>
 										) : (
-											<button
-												type="button"
-												className="desk-queue-text"
-												onClick={() => setEditingQueuedId(item.id)}
-											>
-												{item.text}
-											</button>
+											<div className="desk-queue-copy">
+												<AttachmentThumbs items={item.attachments ?? []} />
+												{item.text ? (
+													<button
+														type="button"
+														className="desk-queue-text"
+														onClick={() => setEditingQueuedId(item.id)}
+													>
+														{item.text}
+													</button>
+												) : null}
+											</div>
 										)}
 										<button
 											type="button"
@@ -1151,7 +1385,24 @@ export function App(): React.ReactElement {
 							</ul>
 						) : null}
 						<div className="desk-composer__row">
-							<label className="desk-field">
+							<input
+								ref={fileInputRef}
+								className="visually-hidden"
+								type="file"
+								multiple
+								onChange={(event) => {
+									addFiles(Array.from(event.target.files ?? []));
+									event.target.value = "";
+								}}
+							/>
+							<fieldset
+								className={`desk-field desk-compose-box${attachments.length > 0 ? " has-files" : ""}`}
+								onDragEnter={onFileDragEnter}
+								onDragOver={onFileDragOver}
+								onDragLeave={onFileDragLeave}
+								onDrop={onFileDrop}
+							>
+								<legend className="visually-hidden">Message composer</legend>
 								{slashOpen && slashItems.length > 0 ? (
 									<div className="desk-slash cel-float">
 										{slashItems.map((item, index) => (
@@ -1202,11 +1453,12 @@ export function App(): React.ReactElement {
 										</button>
 									</div>
 								) : null}
-								<span className="visually-hidden">Message</span>
+								<AttachmentThumbs items={attachments} onRemove={removeAttachment} />
 								<textarea
 									ref={inputRef}
 									className="cel-input desk-compose-input"
 									rows={1}
+									aria-label="Message"
 									value={draft}
 									placeholder={
 										listening
@@ -1219,55 +1471,79 @@ export function App(): React.ReactElement {
 									onChange={(event) => setDraft(event.target.value)}
 									onKeyDown={onKeyDown}
 								/>
-							</label>
-							{status === "running" || status === "approval" ? (
-								<button
-									type="button"
-									className="cel-btn cel-btn--tertiary cel-btn--compact desk-send"
-									onClick={() => void stop()}
-								>
-									<Square size={16} weight="regular" />
-									Stop
-								</button>
-							) : null}
-							{listening ? (
-								<>
-									<span className="cel-chip cel-chip--run">
-										<span className="cel-chip__spin" aria-hidden="true" />
-										Listening
-									</span>
+								<div className="desk-compose-bar">
 									<button
 										type="button"
-										className="cel-btn cel-btn--tertiary cel-btn--compact desk-send"
-										aria-label="Stop dictation"
-										aria-pressed
-										onClick={() => stopDictation()}
+										className="desk-compose-icon"
+										aria-label="Add files"
+										onClick={() => fileInputRef.current?.click()}
 									>
-										<Microphone size={16} weight="regular" />
+										<Plus size={16} weight="regular" />
 									</button>
-								</>
-							) : status === "idle" ? (
-								<button
-									type="button"
-									className="cel-btn cel-btn--tertiary cel-btn--compact desk-send"
-									aria-label="Dictate"
-									aria-pressed={false}
-									onClick={() => void startDictation()}
-								>
-									<Microphone size={16} weight="regular" />
-								</button>
-							) : null}
-							{!listening && (draft.trim() || status === "idle") ? (
-								<button
-									type="button"
-									className={`cel-btn cel-btn--compact desk-send ${draft.trim() ? "desk-send--go" : "cel-btn--secondary"}`}
-									disabled={!draft.trim()}
-									onClick={() => void submit()}
-									aria-label={status === "running" || status === "approval" ? "Queue" : "Send"}
-								>
-									<PaperPlaneTilt size={16} weight="regular" />
-								</button>
-							) : null}
+									<div className="desk-compose-bar__end">
+										<button
+											type="button"
+											className="desk-compose-model"
+											aria-label="Choose model"
+											disabled={status !== "idle" && status !== "picker"}
+											onClick={() => void openComposerPicker("model")}
+										>
+											<span>{state.modelTarget ?? state.modelLabel}</span>
+											<CaretDown size={12} weight="bold" />
+										</button>
+										<button
+											type="button"
+											className="desk-compose-mode"
+											aria-label="Choose mode"
+											disabled={status !== "idle" && status !== "picker"}
+											onClick={() => void openComposerPicker("mode")}
+										>
+											<span className="desk-compose-mode__dot" aria-hidden="true" />
+											{titleCase(state.mode)}
+										</button>
+										{status === "running" || status === "approval" ? (
+											<button
+												type="button"
+												className="desk-compose-icon"
+												aria-label="Stop"
+												onClick={() => void stop()}
+											>
+												<Square size={16} weight="regular" />
+											</button>
+										) : listening ? (
+											<button
+												type="button"
+												className="desk-compose-icon is-on"
+												aria-label="Stop dictation"
+												aria-pressed
+												onClick={() => stopDictation()}
+											>
+												<Microphone size={16} weight="regular" />
+											</button>
+										) : (
+											<button
+												type="button"
+												className="desk-compose-icon"
+												aria-label="Dictate"
+												aria-pressed={false}
+												disabled={status !== "idle"}
+												onClick={() => void startDictation()}
+											>
+												<Microphone size={16} weight="regular" />
+											</button>
+										)}
+										<button
+											type="button"
+											className={`desk-compose-send${draft.trim() || attachments.length > 0 ? " is-on" : ""}`}
+											disabled={listening || (!draft.trim() && attachments.length === 0)}
+											onClick={() => void submit()}
+											aria-label={status === "running" || status === "approval" ? "Queue" : "Send"}
+										>
+											<PaperPlaneTilt size={16} weight="regular" />
+										</button>
+									</div>
+								</div>
+							</fieldset>
 						</div>
 					</footer>
 				) : null}
@@ -1276,7 +1552,7 @@ export function App(): React.ReactElement {
 						<FloatNotice key={notice.id} text={notice.text} onDismiss={dismissNotice} />
 					</div>
 				) : null}
-			</div>
+			</section>
 			{sessionMenu ? (
 				<div
 					ref={sessionMenuRef}
@@ -1820,7 +2096,10 @@ function TranscriptLine(props: {
 							</div>
 						</>
 					) : (
-						<p>{line.text}</p>
+						<>
+							<AttachmentThumbs items={line.attachments ?? []} variant="chat" />
+							{line.text ? <p>{line.text}</p> : null}
+						</>
 					)}
 				</div>
 			</article>

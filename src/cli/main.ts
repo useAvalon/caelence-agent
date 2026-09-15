@@ -183,7 +183,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 			);
 			return 1;
 		}
-		const child = spawn("bun", ["x", "tauri", "dev"], {
+		const child = spawn("bun", [resolve(desktopDir, "scripts/run-tauri.ts")], {
 			cwd: desktopDir,
 			env,
 			stdio: "inherit",

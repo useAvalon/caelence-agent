@@ -2,8 +2,11 @@ name: Release
 
 # Manual workflow for publishing beta, rc, and stable releases.
 # Auto-detects the semver bump from conventional commit messages since the last
-# release tag; use bump-override to force a specific bump. Requires an NPM_TOKEN
-# repository secret with publish rights to the package.
+# release tag; use bump-override to force a specific bump.
+#
+# Auth is npm trusted publishing (OIDC), not an NPM_TOKEN secret. On npmjs.com
+# add a GitHub Actions trusted publisher for this repo and workflow filename
+# `release.yml`. npm CLI 11.5.1+ exchanges the Actions id-token at publish time.
 
 on:
   workflow_dispatch:
@@ -37,30 +40,8 @@ permissions:
   id-token: write
 
 jobs:
-  # A real (non-dry-run) publish needs an NPM_TOKEN secret. Detect it so a real
-  # release without the token skips with a clear notice instead of failing deep
-  # in the publish step. Dry runs always proceed.
-  guard:
-    name: Check npm token
-    runs-on: ubuntu-latest
-    outputs:
-      enabled: ${{ steps.check.outputs.enabled }}
-    steps:
-      - id: check
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -n "$NPM_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::NPM_TOKEN secret is not set — only dry-run releases can proceed."
-          fi
-
   release:
     name: Release (${{ inputs.channel }})
-    needs: guard
-    if: ${{ inputs.dry-run == true || needs.guard.outputs.enabled == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -72,6 +53,11 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: npm install -g npm@latest
       - run: bun install
       - run: bun run typecheck
       - run: bun run test
@@ -128,10 +114,7 @@ jobs:
           echo "::notice::New version: ${NEW}"
 
       - name: Publish to npm
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
           TAG="${{ inputs.channel }}"
           [ "$TAG" = "stable" ] && TAG="latest"
           if [ "${{ inputs.dry-run }}" = "true" ]; then

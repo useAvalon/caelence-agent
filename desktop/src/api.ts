@@ -366,12 +366,40 @@ export async function micStop(): Promise<{ data: string; format: string }> {
 	return invoke("mic_stop");
 }
 
+export async function filesFromDroppedPaths(paths: string[]): Promise<File[]> {
+	const { invoke } = await import("@tauri-apps/api/core");
+	const files: File[] = [];
+	for (const path of paths) {
+		const trimmed = path.trim();
+		if (!trimmed) continue;
+		try {
+			const item = await invoke<{ name: string; mime: string; data: string }>("read_drop_file", {
+				path: trimmed,
+			});
+			const raw = atob(item.data);
+			const bytes = new Uint8Array(raw.length);
+			for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+			files.push(new File([bytes], item.name, { type: item.mime }));
+		} catch {
+			// skip unreadable paths
+		}
+	}
+	return files;
+}
+
+export interface TurnAttachmentPayload {
+	name: string;
+	mime: string;
+	data: string;
+}
+
 export async function startTurn(
 	bridge: BridgeClient,
 	message: string,
 	onEvent?: (event: AgentEvent) => void,
 	signal?: AbortSignal,
 	editUserTurn?: number,
+	attachments?: TurnAttachmentPayload[],
 ): Promise<{ outcome?: SlashOutcome; state?: DesktopState } | void> {
 	const res = await fetch(`${bridge.url}/turn`, {
 		method: "POST",
@@ -382,6 +410,7 @@ export async function startTurn(
 		body: JSON.stringify({
 			message,
 			...(editUserTurn !== undefined ? { editUserTurn } : {}),
+			...(attachments && attachments.length > 0 ? { attachments } : {}),
 		}),
 		signal,
 	});

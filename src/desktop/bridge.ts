@@ -27,6 +27,7 @@ import { createHarness, type HarnessRuntime } from "../runtime.ts";
 import { openResolvedPath, resolveLocalPath } from "./open-local.ts";
 import { readPreviewCache, writePreviewCache } from "./preview-cache.ts";
 import { applyStoredOpenRouterKey, maskSecret, writeOpenRouterKey } from "./secrets.ts";
+import { composeUploadMessage, parseIncomingUploads, saveUploads } from "./uploads.ts";
 
 export interface DesktopState {
 	name: string;
@@ -599,20 +600,25 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 			if (req.method === "POST" && path === "/turn") {
 				if (busy) return json({ error: "A turn is already running." }, 409);
 				const body = await readJson(req);
-				const message = typeof body.message === "string" ? body.message : "";
-				if (!message.trim()) return json({ error: "Message is empty." }, 400);
+				const incoming = typeof body.message === "string" ? body.message : "";
 				const editUserTurn =
 					typeof body.editUserTurn === "number" &&
 					Number.isInteger(body.editUserTurn) &&
 					body.editUserTurn >= 0
 						? body.editUserTurn
 						: undefined;
-				if (editUserTurn === undefined && isHelpAlias(message)) {
+				const uploads =
+					editUserTurn === undefined && !incoming.trim().startsWith("/")
+						? saveUploads(harness.cwd, parseIncomingUploads(body.attachments))
+						: [];
+				const message = composeUploadMessage(incoming, uploads);
+				if (!message.trim()) return json({ error: "Message is empty." }, 400);
+				if (editUserTurn === undefined && isHelpAlias(incoming)) {
 					const outcome = await runSlashLine(harness, "/help");
 					return json({ outcome, state: snapshot(harness, busy, title) });
 				}
-				if (editUserTurn === undefined && message.trim().startsWith("/")) {
-					const outcome = await runSlashLine(harness, message);
+				if (editUserTurn === undefined && incoming.trim().startsWith("/")) {
+					const outcome = await runSlashLine(harness, incoming);
 					if (outcome.kind === "clear") title = "New chat";
 					if (outcome.kind === "session") {
 						harness.setSession(outcome.session.id);

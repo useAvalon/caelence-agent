@@ -1,12 +1,20 @@
+import type { ComposerAttachment } from "./composer-files.ts";
+
 export interface QueuedMessage {
 	id: string;
 	text: string;
+	attachments?: ComposerAttachment[];
 }
 
-export function enqueueMessage(queue: QueuedMessage[], text: string, id: string): QueuedMessage[] {
+export function enqueueMessage(
+	queue: QueuedMessage[],
+	text: string,
+	id: string,
+	attachments: ComposerAttachment[] = [],
+): QueuedMessage[] {
 	const trimmed = text.trim();
-	if (!trimmed) return queue;
-	return [...queue, { id, text: trimmed }];
+	if (!trimmed && attachments.length === 0) return queue;
+	return [...queue, { id, text: trimmed, ...(attachments.length > 0 ? { attachments } : {}) }];
 }
 
 export function removeQueued(queue: QueuedMessage[], id: string): QueuedMessage[] {

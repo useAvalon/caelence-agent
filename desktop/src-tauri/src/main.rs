@@ -138,6 +138,59 @@ fn bridge_info(info: State<BridgeInfo>) -> BridgeInfo {
     info.inner().clone()
 }
 
+#[derive(serde::Serialize)]
+struct DroppedFile {
+    name: String,
+    mime: String,
+    data: String,
+}
+
+fn mime_from_name(name: &str) -> String {
+    let ext = std::path::Path::new(name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "pdf" => "application/pdf",
+        "txt" | "md" => "text/plain",
+        "json" => "application/json",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+#[tauri::command]
+fn read_drop_file(path: String) -> Result<DroppedFile, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let path = expand_user_path(&path)?;
+    if !path.is_file() {
+        return Err("File is missing.".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|err| format!("Could not read the file: {err}"))?;
+    if bytes.len() > 10 * 1024 * 1024 {
+        return Err("File is too large.".into());
+    }
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file")
+        .to_string();
+    Ok(DroppedFile {
+        mime: mime_from_name(&name),
+        data: STANDARD.encode(bytes),
+        name,
+    })
+}
+
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -235,7 +288,14 @@ fn main() {
         .manage(info)
         .manage(BridgeProcess(Mutex::new(Some(child))))
         .manage(MicState::default())
-        .invoke_handler(tauri::generate_handler![bridge_info, open_url, open_path, mic_start, mic_stop])
+        .invoke_handler(tauri::generate_handler![
+            bridge_info,
+            open_url,
+            open_path,
+            mic_start,
+            mic_stop,
+            read_drop_file
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Harness")
         .run(|app, event| {

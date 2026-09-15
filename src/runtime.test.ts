@@ -62,6 +62,30 @@ describe("createHarness modes", () => {
 		}
 	});
 
+	test("starts without an OpenRouter key", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-nokey-"));
+		const previous = process.env.OPENROUTER_API_KEY;
+		delete process.env.OPENROUTER_API_KEY;
+		try {
+			const harness = await createHarness({
+				cwd,
+				config: DEFAULT_CONFIG,
+				constructAgent: () => ({
+					async run() {
+						throw new Error("should not run");
+					},
+				}),
+				observability: noopObservability,
+			});
+			expect(harness.hasApiKey).toBe(false);
+			harness.close();
+		} finally {
+			if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
+			else process.env.OPENROUTER_API_KEY = previous;
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	test("accumulates usage on the runtime", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "harness-spend-"));
 		try {
