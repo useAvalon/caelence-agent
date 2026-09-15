@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Resvg } from "@resvg/resvg-js";
 
-const brand = resolve(import.meta.dir, "../../../brand/logo");
+const brand = resolve(import.meta.dir, "../../brand/logo");
 const iconsDir = resolve(import.meta.dir, "../src-tauri/icons");
 const svg16Path = resolve(brand, "favicon-agent-bg-16.svg");
 const svg32Path = resolve(brand, "favicon-agent-bg-32.svg");

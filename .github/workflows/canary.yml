@@ -4,7 +4,11 @@ name: Canary Release
 # library source. The release train is anchored to the next patch of the
 # current stable version: stable 0.1.0 -> train v0.1.1, published as
 # v0.1.1-canary.0, v0.1.1-canary.1, ... under the npm "canary" dist-tag.
-# Requires an NPM_TOKEN repository secret.
+#
+# Auth is npm trusted publishing (OIDC), not an NPM_TOKEN secret. On npmjs.com
+# add a GitHub Actions trusted publisher for this repo and workflow filename
+# `canary.yml`. Until the package exists on the registry, this workflow is a
+# no-op so main stays green.
 
 on:
   push:
@@ -21,24 +25,20 @@ permissions:
   id-token: write
 
 jobs:
-  # Publishing is only possible once an NPM_TOKEN secret is configured. Detect
-  # it here and skip the canary job otherwise, so the workflow is a no-op (green)
-  # rather than a failure before npm publishing has been set up.
   guard:
-    name: Check npm token
+    name: Check package on npm
     runs-on: ubuntu-latest
     outputs:
       enabled: ${{ steps.check.outputs.enabled }}
     steps:
       - id: check
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -n "$NPM_TOKEN" ]; then
+          NAME="@useavalon/caelence-agent"
+          if npm view "$NAME" name >/dev/null 2>&1; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::NPM_TOKEN secret is not set — skipping canary publish."
+            echo "::notice::$NAME is not on npm yet. Add a trusted publisher on npmjs.com after the first publish, then canary will run."
           fi
 
   canary:
@@ -56,15 +56,15 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: npm install -g npm@latest
       - run: bun install
       - run: bun run typecheck
       - run: bun run test
       - run: bun run check:exports
-
-      - name: Configure npm auth
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
 
       - name: Compute canary version
         id: ver

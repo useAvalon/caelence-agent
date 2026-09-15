@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../config.ts";
@@ -48,6 +48,7 @@ async function withBridge(
 	const headers = { authorization: "Bearer test-token", "content-type": "application/json" };
 	return {
 		ready,
+		cwd,
 		headers,
 		async close() {
 			await stop();
@@ -324,6 +325,36 @@ describe("desktop bridge", () => {
 			const afterDelete = await fetch(`${ctx.ready.url}/sessions`, { headers: ctx.headers });
 			const emptyList = (await afterDelete.json()) as { items: unknown[] };
 			expect(emptyList.items).toEqual([]);
+		} finally {
+			await ctx.close();
+		}
+	});
+
+	test("saves turn attachments and allows an attachments-only message", async () => {
+		const ctx = await withBridge();
+		try {
+			const turn = await fetch(`${ctx.ready.url}/turn`, {
+				method: "POST",
+				headers: ctx.headers,
+				body: JSON.stringify({
+					message: "",
+					attachments: [
+						{
+							name: "note.txt",
+							mime: "text/plain",
+							data: Buffer.from("from the composer").toString("base64"),
+						},
+					],
+				}),
+			});
+			expect(turn.ok).toBe(true);
+			await turn.text();
+			const names = await readdir(join(ctx.cwd, ".harness", "uploads"));
+			expect(names.some((name) => name.endsWith("-note.txt"))).toBe(true);
+			const file = names.find((name) => name.endsWith("-note.txt"));
+			expect(await readFile(join(ctx.cwd, ".harness", "uploads", file ?? ""), "utf8")).toBe(
+				"from the composer",
+			);
 		} finally {
 			await ctx.close();
 		}
