@@ -229,7 +229,8 @@ describe("dispatchSlash", () => {
 			await rm(home, { recursive: true, force: true });
 		}
 		const prevFetch = globalThis.fetch;
-		globalThis.fetch = async () => new Response(JSON.stringify({ skills: [] }));
+		globalThis.fetch = (async () =>
+			new Response(JSON.stringify({ skills: [] }))) as unknown as typeof fetch;
 		try {
 			const result = await runSlashLine(fakeHarness(), "/skill find copywriting");
 			expect(result.kind).toBe("picker");

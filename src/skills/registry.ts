@@ -463,13 +463,13 @@ async function installFromGithub(
 
 	const downloaded = await downloadSkillFiles(input, files, skillMd, root);
 	if ("error" in downloaded) return downloaded;
-	const markdown = downloaded["SKILL.md"];
+	const markdown = downloaded.files["SKILL.md"];
 	if (!markdown) return { error: "Could not download SKILL.md." };
 	const name = parseSkillMarkdown(markdown, "SKILL.md", ".").name;
 	const catalogRef =
 		input.catalogRef?.trim() ||
 		(input.skill ? `${input.owner}/${input.repo}@${input.skill}` : undefined);
-	return writeSkillDir(input.destRoot, name, downloaded, catalogRef);
+	return writeSkillDir(input.destRoot, name, downloaded.files, catalogRef);
 }
 
 async function downloadSkillFiles(
@@ -477,7 +477,7 @@ async function downloadSkillFiles(
 	files: string[],
 	skillMd: string,
 	root: string,
-): Promise<Record<string, string> | { error: string }> {
+): Promise<{ files: Record<string, string> } | { error: string }> {
 	const downloaded: Record<string, string> = {};
 	for (const path of files) {
 		if (!path.endsWith(".md") && !path.endsWith(".txt") && path !== skillMd) continue;
@@ -490,7 +490,7 @@ async function downloadSkillFiles(
 		if (!rel || rel.includes("..")) continue;
 		downloaded[rel] = text;
 	}
-	return downloaded;
+	return { files: downloaded };
 }
 
 function writeSkillDir(

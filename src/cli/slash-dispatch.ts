@@ -155,7 +155,10 @@ function matchPublicIntegration(query: string): PublicIntegration | undefined {
 	);
 }
 
-async function toggleIntegration(harness: HarnessRuntime, id: string): Promise<SlashOutcome> {
+async function toggleIntegration(
+	harness: HarnessRuntime,
+	id: string,
+): Promise<{ kind: "text"; text: string }> {
 	const item = matchPublicIntegration(id);
 	if (!item) return { kind: "text", text: `No integration ${JSON.stringify(id)}.` };
 	if (item.connected) {
