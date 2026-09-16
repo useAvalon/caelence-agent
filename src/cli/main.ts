@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAgentCwd } from "../agent-cwd.ts";
 import { loadConfig, resolveOpenRouter } from "../config.ts";
@@ -117,18 +118,24 @@ function desktopToolchainEnv(desktopDir: string, cwd: string): NodeJS.ProcessEnv
 	const cargoHome = resolve(desktopDir, ".toolchain/cargo");
 	const rustupHome = resolve(desktopDir, ".toolchain/rustup");
 	const cargoBin = resolve(cargoHome, "bin");
+	const bunDir = dirname(process.execPath);
+	const systemCargoBin = resolve(homedir(), ".cargo/bin");
 	const env: NodeJS.ProcessEnv = { ...process.env, HARNESS_CWD: cwd };
+	const pathDirs = [bunDir];
 	if (existsSync(resolve(cargoBin, "cargo"))) {
 		env.CARGO_HOME = cargoHome;
 		env.RUSTUP_HOME = rustupHome;
-		env.PATH = `${cargoBin}:${env.PATH ?? ""}`;
+		pathDirs.unshift(cargoBin);
+	} else if (existsSync(resolve(systemCargoBin, "cargo"))) {
+		pathDirs.unshift(systemCargoBin);
 	}
+	env.PATH = pathDirs.join(":");
 	return env;
 }
 
 function hasCargo(env: NodeJS.ProcessEnv): boolean {
 	if (env.CARGO_HOME && existsSync(resolve(env.CARGO_HOME, "bin/cargo"))) return true;
-	return (env.PATH ?? "").split(":").some((dir) => dir && existsSync(resolve(dir, "cargo")));
+	return existsSync(resolve(homedir(), ".cargo/bin/cargo"));
 }
 
 function takeFlag(args: string[], name: string): { value?: string; rest: string[] } {
@@ -200,7 +207,7 @@ async function runDesktop(cwd: string): Promise<number> {
 		);
 		return 1;
 	}
-	const child = spawn("bun", [resolve(desktopDir, "scripts/run-tauri.ts")], {
+	const child = spawn(process.execPath, [resolve(desktopDir, "scripts/run-tauri.ts")], {
 		cwd: desktopDir,
 		env,
 		stdio: "inherit",
@@ -251,7 +258,10 @@ async function runSkillAdd(
 		...(action.skill ? { skill: action.skill } : {}),
 	});
 	if ("error" in result) {
-		const extra = result.choices?.length ? ` Available: ${result.choices.join(", ")}` : "";
+		const extra =
+			result.choices && result.choices.length > 1 && result.choices.length <= 8
+				? ` Available: ${result.choices.join(", ")}`
+				: "";
 		process.stderr.write(`${result.error}${extra}\n`);
 		return 1;
 	}

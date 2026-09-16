@@ -220,7 +220,7 @@ describe("dispatchSlash", () => {
 				expect(result.picker).toBe("skill");
 				expect(result.title).toBe("Skills");
 				expect(result.items.some((item) => item.id === "bundled@copywriting")).toBe(true);
-				expect(result.items.some((item) => item.id === "acme/pack@hello")).toBe(true);
+				expect(result.items.some((item) => item.id === "acme/pack/hello")).toBe(true);
 			}
 		} finally {
 			clearPopularSkillsCache();

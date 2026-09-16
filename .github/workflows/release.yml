@@ -38,6 +38,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  pull-requests: write
 
 jobs:
   release:
@@ -124,18 +125,21 @@ jobs:
             npm publish --tag "$TAG" --access public
           fi
 
-      - name: Commit, tag, and GitHub Release
+      - name: Tag, GitHub Release, and version PR
         if: ${{ inputs.dry-run == false }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG="v${VERSION}"
+          BRANCH="release/v${VERSION}"
+          git checkout -b "$BRANCH"
           git add package.json bun.lock 2>/dev/null || git add package.json
-          git commit -m "release: v${VERSION} [skip ci]"
-          git push
+          git commit -m "release: v${VERSION}"
+          git push -u origin "$BRANCH"
           git tag "$TAG"
           git push origin "$TAG"
+          gh pr create --base main --head "$BRANCH" --title "release: v${VERSION}" --body "Version bump from the release workflow. npm already published this version."
           PRERELEASE=""
           [ "${{ inputs.channel }}" != "stable" ] && PRERELEASE="--prerelease"
           gh release create "$TAG" --title "v${VERSION}" --generate-notes $PRERELEASE
