@@ -129,7 +129,8 @@ function desktopToolchainEnv(desktopDir: string, cwd: string): NodeJS.ProcessEnv
 	} else if (existsSync(resolve(systemCargoBin, "cargo"))) {
 		pathDirs.unshift(systemCargoBin);
 	}
-	env.PATH = pathDirs.join(":");
+	const inherited = process.env.PATH ?? "";
+	env.PATH = [...pathDirs, inherited].filter(Boolean).join(":");
 	return env;
 }
 
@@ -197,7 +198,9 @@ function agentCwd(parsed: ParsedCli): string {
 async function runDesktop(cwd: string): Promise<number> {
 	const desktopDir = resolve(fileURLToPath(new URL("../../desktop", import.meta.url)));
 	if (!existsSync(resolve(desktopDir, "package.json"))) {
-		process.stderr.write("Desktop app files are missing from this install.\n");
+		process.stderr.write(
+			"Desktop app files are missing from this install. Reinstall @useavalon/caelence-agent or run caelence from a git checkout.\n",
+		);
 		return 1;
 	}
 	const env = desktopToolchainEnv(desktopDir, cwd);

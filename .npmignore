@@ -2,7 +2,6 @@
 *.test.tsx
 **/*.test.ts
 **/*.test.tsx
-desktop
 examples
 .github
 .husky

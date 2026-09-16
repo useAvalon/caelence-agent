@@ -54,4 +54,22 @@ if (missing.length > 0) {
 	process.exit(1);
 }
 
+const files = Array.isArray(pkg.files) ? pkg.files : [];
+if (!files.includes("desktop")) {
+	console.error("✗ package.json files must include desktop (caelence desktop)");
+	process.exit(1);
+}
+if (!existsSync(resolve(root, "desktop/package.json"))) {
+	console.error("✗ desktop/package.json is missing");
+	process.exit(1);
+}
+const npmignore = readFileSync(resolve(root, ".npmignore"), "utf8")
+	.split(/\r?\n/)
+	.map((line) => line.trim());
+if (npmignore.includes("desktop")) {
+	console.error("✗ .npmignore excludes desktop; caelence desktop would ship empty");
+	process.exit(1);
+}
+
 console.log(`✓ all ${collectTargets().length} package.json entry-point targets exist`);
+console.log("✓ desktop is included in the published package");

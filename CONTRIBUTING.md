@@ -17,6 +17,8 @@ bunx biome ci .
 
 `bun run desktop` starts the window. `bun start` starts the terminal UI. Paste or export an OpenRouter key the same way the README describes. Do not commit `.env`, `.harness/`, or API keys.
 
+Coding agents should read [AGENTS.md](AGENTS.md) for layout, commands, and product rules.
+
 ## Pull requests
 
 1. Fork [useAvalon/caelence-agent](https://github.com/useAvalon/caelence-agent).
