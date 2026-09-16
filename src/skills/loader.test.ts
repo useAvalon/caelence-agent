@@ -127,6 +127,38 @@ Body here.
 		}
 	});
 
+	test("keeps user skills with the same YAML name when catalog refs differ", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-sk-dup-"));
+		try {
+			const user = join(cwd, "user");
+			mkdirSync(join(user, "acme-pack-frontend-design"), { recursive: true });
+			mkdirSync(join(user, "other-ui-frontend-design"), { recursive: true });
+			writeFileSync(
+				join(user, "acme-pack-frontend-design", "SKILL.md"),
+				"---\nname: frontend-design\n---\n\n# Acme\n",
+			);
+			writeFileSync(
+				join(user, "acme-pack-frontend-design", ".catalog-ref"),
+				"acme/pack/frontend-design\n",
+			);
+			writeFileSync(
+				join(user, "other-ui-frontend-design", "SKILL.md"),
+				"---\nname: frontend-design\n---\n\n# Other\n",
+			);
+			writeFileSync(
+				join(user, "other-ui-frontend-design", ".catalog-ref"),
+				"other/ui/frontend-design\n",
+			);
+			const merged = loadMergedSkills(join(cwd, "host"), user);
+			const dupes = merged.filter((skill) => skill.name === "frontend-design");
+			expect(dupes).toHaveLength(2);
+			expect(skillCatalogPrompt(dupes)).toContain("acme/pack/frontend-design");
+			expect(skillCatalogPrompt(dupes)).toContain("other/ui/frontend-design");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	test("skill catalog lists names only", () => {
 		const catalog = skillCatalogPrompt([
 			{

@@ -18,3 +18,8 @@ export function skillMatches(
 	if (q.length >= 3 && (item.description ?? "").toLowerCase().includes(q)) return true;
 	return false;
 }
+
+export function omitCatalogSkill<T extends { id: string }>(items: T[], id: string): T[] {
+	const key = id.trim().replaceAll("@", "/").toLowerCase();
+	return items.filter((item) => item.id.replaceAll("@", "/").toLowerCase() !== key);
+}

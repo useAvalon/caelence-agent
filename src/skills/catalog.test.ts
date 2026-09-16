@@ -15,9 +15,11 @@ import {
 	skillBlurb,
 	writePopularSkillsCache,
 } from "./catalog.ts";
+import { clearGithubSkillFolderCache } from "./registry.ts";
 
 afterEach(() => {
 	clearPopularSkillsCache();
+	clearGithubSkillFolderCache();
 });
 
 describe("catalog skills", () => {
@@ -57,7 +59,7 @@ describe("catalog skills", () => {
 			loaded,
 		);
 		expect(remote).toMatchObject({
-			id: "anthropics/skills@frontend-design",
+			id: "anthropics/skills/frontend-design",
 			status: "user",
 			origin: "skills.sh",
 			installs: 10,
@@ -97,6 +99,9 @@ describe("catalog skills", () => {
 		);
 		expect(anthropics.status).toBe("user");
 		expect(other.status).toBe("off");
+		expect(anthropics.source).toBe("anthropics/skills");
+		expect(other.source).toBe("pbakaus/impeccable");
+		expect(anthropics.id).not.toBe(other.id);
 	});
 
 	test("page lists bundled skills and extra user skills separately", () => {
@@ -134,11 +139,13 @@ describe("catalog skills", () => {
 			expect(cached.hits[0]?.name).toBe("hello");
 			expect(cachedPopularSkills(process.env)[0]?.name).toBe("hello");
 
-			let called = 0;
+			let searched = 0;
 			const hits = await refreshPopularSkills(async (url) => {
-				called += 1;
-				expect(url).toContain("q=frontend");
-				expect(url).toContain("limit=16");
+				const href = String(url);
+				if (href.includes("/git/trees/")) return new Response("missing", { status: 404 });
+				searched += 1;
+				expect(href).toContain("q=frontend");
+				expect(href).toContain("limit=16");
 				return Response.json({
 					skills: [
 						{
@@ -150,7 +157,7 @@ describe("catalog skills", () => {
 					],
 				});
 			}, process.env);
-			expect(called).toBe(1);
+			expect(searched).toBe(1);
 			expect(hits[0]).toMatchObject({ name: "hello", installs: 99 });
 		} finally {
 			if (prev === undefined) delete process.env.HARNESS_HOME;
@@ -179,6 +186,48 @@ describe("catalog skills", () => {
 			expect(hits.some((hit) => hit.name === "hello")).toBe(true);
 			expect(hits.filter((hit) => hit.name === "impeccable")).toHaveLength(1);
 			expect(hits[0]?.source).toBe("bundled");
+		} finally {
+			if (prev === undefined) delete process.env.HARNESS_HOME;
+			else process.env.HARNESS_HOME = prev;
+			await rm(home, { recursive: true, force: true });
+		}
+	});
+
+	test("browse drops cached skills.sh names missing from the GitHub repo", async () => {
+		const home = await mkdtemp(join(tmpdir(), "harness-browse-ghost-"));
+		const prev = process.env.HARNESS_HOME;
+		process.env.HARNESS_HOME = home;
+		try {
+			writePopularSkillsCache(
+				[
+					{
+						id: "openai/skills/frontend-skill",
+						name: "frontend-skill",
+						source: "openai/skills",
+						installs: 1600,
+					},
+					{
+						id: "openai/skills/chatgpt-apps",
+						name: "chatgpt-apps",
+						source: "openai/skills",
+						installs: 12,
+					},
+				],
+				process.env,
+			);
+			const hits = await browseSkillCatalog(async (url) => {
+				if (String(url).includes("/repos/openai/skills/git/trees/")) {
+					return Response.json({
+						tree: [
+							{ path: "skills/aspnet-core/SKILL.md", type: "blob" },
+							{ path: "skills/chatgpt-apps/SKILL.md", type: "blob" },
+						],
+					});
+				}
+				throw new Error(`unexpected ${url}`);
+			}, process.env);
+			expect(hits.some((hit) => hit.name === "frontend-skill")).toBe(false);
+			expect(hits.some((hit) => hit.name === "chatgpt-apps")).toBe(true);
 		} finally {
 			if (prev === undefined) delete process.env.HARNESS_HOME;
 			else process.env.HARNESS_HOME = prev;

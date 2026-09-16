@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatSkillInstalls, skillMatches } from "./skill-search.ts";
+import { formatSkillInstalls, omitCatalogSkill, skillMatches } from "./skill-search.ts";
 
 describe("skillMatches", () => {
 	const item = {
@@ -23,5 +23,15 @@ describe("skillMatches", () => {
 	test("formats install counts", () => {
 		expect(formatSkillInstalls(891_500)).toBe("891.5K");
 		expect(formatSkillInstalls(3_400_000)).toBe("3.4M");
+	});
+
+	test("omits a catalog row after add fails", () => {
+		const items = [
+			{ id: "openai/skills/frontend-skill", name: "frontend-skill" },
+			{ id: "openai/skills/chatgpt-apps", name: "chatgpt-apps" },
+		];
+		expect(
+			omitCatalogSkill(items, "openai/skills@frontend-skill").map((item) => item.name),
+		).toEqual(["chatgpt-apps"]);
 	});
 });

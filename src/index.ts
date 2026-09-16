@@ -129,6 +129,8 @@ export {
 export {
 	BUNDLED_PACKS,
 	bundledRegistryHits,
+	catalogRefsMatch,
+	findSkillForCatalogId,
 	formatRegistryHits,
 	installBundledSkills,
 	installSkillFromSource,
@@ -140,6 +142,7 @@ export {
 	searchSkillsSh,
 	skillCatalogRef,
 	skillIsCatalogHit,
+	skillNameFromCatalogId,
 } from "./skills/registry.ts";
 export { parseSkillCommand, SKILL_COMMAND_USAGE, SKILL_FIND_HINT } from "./skills/skill-command.ts";
 export { userSkillsDir } from "./skills/user-dir.ts";

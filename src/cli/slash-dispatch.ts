@@ -15,7 +15,14 @@ import { type GeneratedMedia, generateImage, generateVideo } from "../media/open
 import { readMediaPrefs, writeMediaPrefs } from "../media/prefs.ts";
 import type { HarnessRuntime } from "../runtime.ts";
 import { browseSkillCatalog } from "../skills/catalog.ts";
-import { searchSkillCatalog, skillCatalogRef, skillIsCatalogHit } from "../skills/registry.ts";
+import {
+	findSkillForCatalogId,
+	isBundledCatalogId,
+	searchSkillCatalog,
+	skillCatalogRef,
+	skillIsCatalogHit,
+	skillNameFromCatalogId,
+} from "../skills/registry.ts";
 import { parseSkillCommand, SKILL_COMMAND_USAGE } from "../skills/skill-command.ts";
 import { type MediaModelOption, mediaModelLabel, mediaPickerItems } from "./media-models.ts";
 import { modelPickerItems } from "./models.ts";
@@ -204,6 +211,38 @@ async function handleSkillFind(harness: HarnessRuntime, query: string): Promise<
 	};
 }
 
+async function handleSkillAdd(
+	harness: HarnessRuntime,
+	parsed: Extract<ReturnType<typeof parseSkillCommand>, { action: "add" }>,
+): Promise<SlashOutcome> {
+	const result = await harness.addSkill(parsed.source, {
+		scope: parsed.scope,
+		...(parsed.skill ? { skill: parsed.skill } : {}),
+	});
+	return { kind: "text", text: "error" in result ? result.error : `Loaded ${result.rel}` };
+}
+
+async function handleSkillRemove(
+	harness: HarnessRuntime,
+	parsed: Extract<ReturnType<typeof parseSkillCommand>, { action: "remove" }>,
+): Promise<SlashOutcome> {
+	const loaded = findSkillForCatalogId(harness.skills, parsed.name);
+	const result = harness.removeSkill(parsed.name);
+	const verb = loaded && loaded.source !== "user" ? "Disabled" : "Removed";
+	return {
+		kind: "text",
+		text: result.ok ? `${verb} ${parsed.name}` : (result.error ?? "Could not remove."),
+	};
+}
+
+async function handleSkillNew(
+	harness: HarnessRuntime,
+	parsed: Extract<ReturnType<typeof parseSkillCommand>, { action: "new" }>,
+): Promise<SlashOutcome> {
+	const result = await harness.authorSkill(parsed.name, parsed.brief);
+	return { kind: "text", text: "error" in result ? result.error : `Wrote ${result.rel}` };
+}
+
 async function handleSkillSlash(
 	harness: HarnessRuntime,
 	arg: string,
@@ -213,28 +252,9 @@ async function handleSkillSlash(
 	const parsed = parseSkillCommand(payload);
 	if ("error" in parsed) return { kind: "text", text: parsed.error };
 	if (parsed.action === "find") return handleSkillFind(harness, parsed.query);
-	if (parsed.action === "add") {
-		const result = await harness.addSkill(parsed.source, {
-			scope: parsed.scope,
-			...(parsed.skill ? { skill: parsed.skill } : {}),
-		});
-		return { kind: "text", text: "error" in result ? result.error : `Loaded ${result.rel}` };
-	}
-	if (parsed.action === "remove") {
-		const loaded = harness.skills.find(
-			(skill) => skill.name.toLowerCase() === parsed.name.toLowerCase(),
-		);
-		const result = harness.removeSkill(parsed.name);
-		const verb = loaded && loaded.source !== "user" ? "Disabled" : "Removed";
-		return {
-			kind: "text",
-			text: result.ok ? `${verb} ${parsed.name}` : (result.error ?? "Could not remove."),
-		};
-	}
-	if (parsed.action === "new") {
-		const result = await harness.authorSkill(parsed.name, parsed.brief);
-		return { kind: "text", text: "error" in result ? result.error : `Wrote ${result.rel}` };
-	}
+	if (parsed.action === "add") return handleSkillAdd(harness, parsed);
+	if (parsed.action === "remove") return handleSkillRemove(harness, parsed);
+	if (parsed.action === "new") return handleSkillNew(harness, parsed);
 	return { kind: "text", text: SKILL_COMMAND_USAGE };
 }
 
@@ -408,18 +428,14 @@ async function applySkillPicker(
 	harness: HarnessRuntime,
 	id: string,
 ): Promise<{ kind: "text"; text: string }> {
-	const name = id.split("@").pop()?.trim() ?? id;
-	if (harness.disabledSkills().some((entry) => entry === name.toLowerCase())) {
+	const name = skillNameFromCatalogId(id);
+	if (isBundledCatalogId(id) && harness.disabledSkills().includes(name.toLowerCase())) {
 		harness.enableSkill(name);
 		return { kind: "text", text: `Enabled ${name}` };
 	}
-	const loaded =
-		harness.skills.find((skill) => skill.catalogRef === id) ??
-		harness.skills.find(
-			(skill) => skill.source !== "user" && skill.name.toLowerCase() === name.toLowerCase(),
-		);
+	const loaded = findSkillForCatalogId(harness.skills, id);
 	if (loaded) {
-		const result = harness.removeSkill(loaded.name);
+		const result = harness.removeSkill(loaded.catalogRef ?? loaded.name);
 		const verb = loaded.source === "user" ? "Removed" : "Disabled";
 		return {
 			kind: "text",

@@ -4,7 +4,10 @@ import { harnessHome } from "../desktop/secrets.ts";
 import {
 	bundledPackStepNames,
 	bundledRegistryHits,
+	dropUninstallableCatalogHits,
 	type FetchLike,
+	filterGithubCatalogHits,
+	isInstallableSkillsShHit,
 	type RegistryHit,
 	searchSkillsSh,
 	skillCatalogRef,
@@ -114,6 +117,7 @@ export function decorateCatalogSkill(
 ): CatalogSkill {
 	const current = loaded.find((skill) => skillIsCatalogHit(skill, hit));
 	const off = new Set([...disabled].map((name) => name.toLowerCase()));
+	const disabledHit = hit.source === "bundled" && off.has(hit.name.toLowerCase());
 	return {
 		id: skillCatalogRef(hit),
 		name: hit.name,
@@ -121,8 +125,16 @@ export function decorateCatalogSkill(
 		origin: hit.source === "bundled" ? "bundled" : "skills.sh",
 		source: hit.source === "host" ? "project" : hit.source,
 		...(typeof hit.installs === "number" ? { installs: hit.installs } : {}),
-		status: catalogStatus(current, off.has(hit.name.toLowerCase())),
+		status: catalogStatus(current, disabledHit),
 	};
+}
+
+function catalogOwnerRepo(ref?: string): string {
+	const value = ref?.trim();
+	if (!value || /^(bundled|user|host|project)[@/]/i.test(value)) return "";
+	const parts = value.replaceAll("@", "/").split("/").filter(Boolean);
+	if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+	return "";
 }
 
 export function buildSkillsPage(
@@ -133,22 +145,23 @@ export function buildSkillsPage(
 	const bundled = bundledSkillHits().map((hit) => decorateCatalogSkill(hit, loaded, disabled));
 	const bundledNames = new Set(bundled.map((item) => item.name.toLowerCase()));
 	const steps = bundledPackStepNames();
-	const popular = popularHits
+	const popular = dropUninstallableCatalogHits(popularHits)
 		.filter((hit) => hit.source !== "bundled" && !bundledNames.has(hit.name.toLowerCase()))
 		.map((hit) => decorateCatalogSkill(hit, loaded, disabled));
-	const seen = new Set([...bundledNames, ...popular.map((item) => item.name.toLowerCase())]);
+	const listed = [...bundledSkillHits(), ...popularHits];
 	const extra = loaded
 		.filter((skill) => {
 			const key = skill.name.toLowerCase();
 			if (steps.has(key)) return false;
-			return !seen.has(key);
+			return !listed.some((hit) => skillIsCatalogHit(skill, hit));
 		})
 		.map((skill) =>
 			decorateCatalogSkill(
 				{
 					id: skill.catalogRef ?? `${skill.source}/${skill.name}`,
 					name: skill.name,
-					source: skill.source === "user" ? "user" : "project",
+					source:
+						catalogOwnerRepo(skill.catalogRef) || (skill.source === "user" ? "user" : "project"),
 					description: skill.description ?? "",
 				},
 				loaded,
@@ -178,7 +191,7 @@ function parseHitRow(row: unknown): RegistryHit | undefined {
 	const name = typeof item.name === "string" ? item.name.trim() : "";
 	const source = typeof item.source === "string" ? item.source.trim() : "";
 	const id = typeof item.id === "string" ? item.id.trim() : "";
-	if (!name || !source) return undefined;
+	if (!name || !source || !isInstallableSkillsShHit({ source })) return undefined;
 	return {
 		id: id || `${source}/${name}`,
 		name,
@@ -251,10 +264,16 @@ export async function browseSkillCatalog(
 	const cached = readPopularSkillsCache(env);
 	const popular = cached.stale ? await refreshPopularSkills(fetchFn, env) : cached.hits;
 	const seen = new Set(bundled.map((hit) => hit.name.toLowerCase()));
-	return [
-		...bundled,
-		...popular.filter((hit) => hit.source !== "bundled" && !seen.has(hit.name.toLowerCase())),
-	];
+	const remote = await filterGithubCatalogHits(
+		popular.filter(
+			(hit) =>
+				hit.source !== "bundled" &&
+				isInstallableSkillsShHit(hit) &&
+				!seen.has(hit.name.toLowerCase()),
+		),
+		fetchFn,
+	);
+	return [...bundled, ...remote];
 }
 
 export async function refreshPopularSkills(

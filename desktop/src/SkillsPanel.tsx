@@ -11,10 +11,16 @@ import {
 	type SkillsPage,
 	searchSkills,
 } from "./api";
-import { formatSkillInstalls, skillMatches } from "./skill-search";
+import { formatSkillInstalls, omitCatalogSkill, skillMatches } from "./skill-search";
 
-function skillGlyph(name: string): string {
-	const letters = name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2);
+function skillTitle(item: PublicSkill): string {
+	return item.name;
+}
+
+function skillGlyph(item: PublicSkill): string {
+	const letters = skillTitle(item)
+		.replace(/[^a-zA-Z0-9]/g, "")
+		.slice(0, 2);
 	return letters.toUpperCase() || "SK";
 }
 
@@ -25,6 +31,12 @@ function skillDetail(item: PublicSkill): string {
 	const installs =
 		item.installs !== undefined ? `${formatSkillInstalls(item.installs)} installs` : "";
 	return [item.source, item.description, installs].filter(Boolean).join(" · ");
+}
+
+function pendingSkillLabel(status: PublicSkill["status"]): string {
+	if (status === "user") return "Removing";
+	if (status === "project") return "Disabling";
+	return "Adding";
 }
 
 function SkillActions(
@@ -40,7 +52,7 @@ function SkillActions(
 		return (
 			<span className="desk-integration-ok">
 				<span className="cel-chip__spin" aria-hidden="true" />
-				{item.status === "user" ? "Removing" : item.status === "project" ? "Disabling" : "Adding"}
+				{pendingSkillLabel(item.status)}
 			</span>
 		);
 	}
@@ -100,9 +112,9 @@ function SkillRow(
 	const { item } = props;
 	return (
 		<li>
-			<span className="desk-integration-glyph desk-integration-mark">{skillGlyph(item.name)}</span>
+			<span className="desk-integration-glyph desk-integration-mark">{skillGlyph(item)}</span>
 			<div>
-				<p>{item.name}</p>
+				<p>{skillTitle(item)}</p>
 				<em>{skillDetail(item)}</em>
 			</div>
 			<div className="desk-integration-actions">
@@ -271,6 +283,18 @@ export function SkillsPanel(
 			applyPage(result);
 		} catch (err) {
 			props.onNotice(errorMessage(err));
+			if (action === "add") {
+				setRemote((current) => (current ? omitCatalogSkill(current, id) : current));
+				setPage((current) =>
+					current
+						? {
+								...current,
+								popular: omitCatalogSkill(current.popular, id),
+								loaded: omitCatalogSkill(current.loaded, id),
+							}
+						: current,
+				);
+			}
 		} finally {
 			setPendingId(null);
 		}

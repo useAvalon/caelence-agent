@@ -59,7 +59,14 @@ import {
 	type Skill,
 	skillCatalogPrompt,
 } from "./skills/loader.ts";
-import { installSkillFromSource, removeSkillFromRoots, searchSkills } from "./skills/registry.ts";
+import {
+	findSkillForCatalogId,
+	installSkillFromSource,
+	isBundledCatalogId,
+	removeSkillFromRoots,
+	searchSkills,
+	skillNameFromCatalogId,
+} from "./skills/registry.ts";
 import { userSkillsDir } from "./skills/user-dir.ts";
 import { createGitTools } from "./tools/git.ts";
 import { createLocalTools } from "./tools/local.ts";
@@ -338,8 +345,8 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			return { ok: true };
 		},
 		async addSkill(source, options) {
-			const name = source.split("@").pop()?.trim() ?? source;
-			if (isSkillDisabled(cwd, name)) {
+			const name = skillNameFromCatalogId(source);
+			if (isBundledCatalogId(source) && name && isSkillDisabled(cwd, name)) {
 				runtime.enableSkill(name);
 				return { rel: name };
 			}
@@ -351,7 +358,10 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				...(options?.skill ? { skill: options.skill } : {}),
 			});
 			if ("error" in result) {
-				const extra = result.choices?.length ? ` Available: ${result.choices.join(", ")}` : "";
+				const extra =
+					result.choices && result.choices.length > 1 && result.choices.length <= 8
+						? ` Available: ${result.choices.join(", ")}`
+						: "";
 				return { error: `${result.error}${extra}` };
 			}
 			runtime.reloadSkills();
@@ -365,13 +375,13 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			return { rel: `${root}/${result.rel}` };
 		},
 		removeSkill(name) {
-			const loaded = skills.find((skill) => skill.name.toLowerCase() === name.trim().toLowerCase());
+			const loaded = findSkillForCatalogId(skills, name);
 			if (loaded && loaded.source !== "user") {
 				disableSkills(cwd, loaded.name);
 				runtime.reloadSkills();
 				return { ok: true };
 			}
-			const result = removeSkillFromRoots(name, removableRoots());
+			const result = removeSkillFromRoots(loaded?.catalogRef ?? name, removableRoots());
 			if (!result.removed) return { ok: false, error: result.reason };
 			runtime.reloadSkills();
 			return { ok: true };
