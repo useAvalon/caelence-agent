@@ -1,0 +1,38 @@
+name: Feature request
+description: A change or addition you want in Caelence agent.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is painful or missing today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you would like instead. A sketch is enough.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Desktop
+        - Terminal UI
+        - Skills / catalog
+        - Integrations
+        - Library
+        - Docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra context
+      description: Examples, prior art, or why this belongs in the agent rather than a skill.
