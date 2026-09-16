@@ -47,6 +47,13 @@ import { resolveAgentVersion } from "./observability/version.ts";
 import { authorSkillMarkdown } from "./skills/author-skill.ts";
 import { createHostSkill, parseSkillNewArgs } from "./skills/create-skill.ts";
 import {
+	disableSkills,
+	enableSkills,
+	isSkillDisabled,
+	readDisabledSkillNames,
+} from "./skills/disabled.ts";
+import {
+	isBundledCatalogDir,
 	loadMergedSkills,
 	resolveHostSkillDirs,
 	type Skill,
@@ -93,6 +100,8 @@ export interface HarnessRuntime {
 	integrationIds(): string[];
 	authorSkill(name: string, brief: string): Promise<{ rel: string } | { error: string }>;
 	findSkills(query: string): Promise<string>;
+	disabledSkills(): string[];
+	enableSkill(name: string): { ok: boolean };
 	addSkill(
 		source: string,
 		options?: { skill?: string; scope?: "user" | "project" },
@@ -128,7 +137,18 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	const skillsDir = resolve(cwd, config.skillsDir);
 	const userDir = userSkillsDir();
 	const hostSkillDirs = () => resolveHostSkillDirs(cwd, config.skillsDir);
-	let skills = loadMergedSkills(hostSkillDirs(), userDir);
+	const removableRoots = () => {
+		const roots = [userDir];
+		if (!isBundledCatalogDir(skillsDir)) roots.push(skillsDir);
+		return roots;
+	};
+	const loadActiveSkills = (): Skill[] => {
+		const disabled = readDisabledSkillNames(cwd);
+		return loadMergedSkills(hostSkillDirs(), userDir).filter(
+			(skill) => !disabled.has(skill.name.toLowerCase()),
+		);
+	};
+	let skills = loadActiveSkills();
 	const layers = loadInstructionLayers({ cwd, projectFile: config.instructionsFile });
 	let mode = parseAgentMode(options.mode ?? config.mode);
 	const composePrompt = (nextMode: AgentMode) =>
@@ -277,7 +297,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			return next.messages.length > session.messages.length;
 		},
 		reloadSkills() {
-			skills = loadMergedSkills(hostSkillDirs(), userDir);
+			skills = loadActiveSkills();
 			systemPrompt = composePrompt(mode);
 			return skills;
 		},
@@ -309,8 +329,22 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		async findSkills(query) {
 			return searchSkills(query);
 		},
+		disabledSkills() {
+			return [...readDisabledSkillNames(cwd)];
+		},
+		enableSkill(name) {
+			enableSkills(cwd, name);
+			runtime.reloadSkills();
+			return { ok: true };
+		},
 		async addSkill(source, options) {
-			const destRoot = options?.scope === "project" ? skillsDir : userDir;
+			const name = source.split("@").pop()?.trim() ?? source;
+			if (isSkillDisabled(cwd, name)) {
+				runtime.enableSkill(name);
+				return { rel: name };
+			}
+			const destRoot =
+				options?.scope === "project" && !isBundledCatalogDir(skillsDir) ? skillsDir : userDir;
 			const result = await installSkillFromSource({
 				source,
 				destRoot,
@@ -324,11 +358,20 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			if (result.installed && result.installed.length > 1) {
 				return { rel: result.installed.join(", ") };
 			}
-			const root = options?.scope === "project" ? config.skillsDir : userDir;
+			const root =
+				options?.scope === "project" && !isBundledCatalogDir(skillsDir)
+					? config.skillsDir
+					: userDir;
 			return { rel: `${root}/${result.rel}` };
 		},
 		removeSkill(name) {
-			const result = removeSkillFromRoots(name, [userDir, skillsDir]);
+			const loaded = skills.find((skill) => skill.name.toLowerCase() === name.trim().toLowerCase());
+			if (loaded && loaded.source !== "user") {
+				disableSkills(cwd, loaded.name);
+				runtime.reloadSkills();
+				return { ok: true };
+			}
+			const result = removeSkillFromRoots(name, removableRoots());
 			if (!result.removed) return { ok: false, error: result.reason };
 			runtime.reloadSkills();
 			return { ok: true };

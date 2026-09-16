@@ -6,16 +6,33 @@ import { initHost } from "./init.ts";
 import { createLocalTools } from "./tools/local.ts";
 
 describe("initHost", () => {
-	test("writes config, skill, eval, and gitignore", async () => {
+	test("default only gitignores .harness/", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "harness-init-"));
 		try {
 			const first = initHost({ cwd, name: "demo" });
+			expect(first.created).toEqual([".gitignore"]);
+			expect(first.created).not.toContain("harness.config.ts");
+			expect(first.created).not.toContain("AGENTS.md");
+			const gitignore = await readFile(join(cwd, ".gitignore"), "utf8");
+			expect(gitignore).toContain(".harness/");
+			const second = initHost({ cwd, name: "demo" });
+			expect(second.skipped).toContain(".gitignore");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("examples writes config, skill, eval, and gitignore", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-init-"));
+		try {
+			const first = initHost({ cwd, name: "demo", examples: true });
 			expect(first.created).toContain("harness.config.ts");
 			expect(first.created).toContain("AGENTS.md");
 			const config = await readFile(join(cwd, "harness.config.ts"), "utf8");
 			expect(config).toContain('name: "demo"');
+			expect(config).toContain('model: "openrouter/auto"');
 			expect(config).toContain('mode: "agent"');
-			const second = initHost({ cwd, name: "demo" });
+			const second = initHost({ cwd, name: "demo", examples: true });
 			expect(second.skipped).toContain("harness.config.ts");
 		} finally {
 			await rm(cwd, { recursive: true, force: true });

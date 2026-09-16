@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	bundledSkillsDir,
+	isBundledCatalogDir,
 	loadMergedSkills,
 	loadSkills,
 	mergeSkills,
 	parseSkillMarkdown,
+	resolveHostSkillDirs,
 	skillCatalogPrompt,
 	stripFrontmatter,
 } from "../skills/loader.ts";
@@ -41,6 +43,25 @@ Body here.
 		expect(skills[0]?.body).toContain("short greeting");
 	});
 
+	test("does not load nested SKILL.md files as extra skills", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-nested-skill-"));
+		try {
+			mkdirSync(join(cwd, "frontend-design", "xlsx"), { recursive: true });
+			writeFileSync(
+				join(cwd, "frontend-design", "SKILL.md"),
+				"---\nname: frontend-design\n---\n\n# UI\n",
+			);
+			writeFileSync(
+				join(cwd, "frontend-design", "xlsx", "SKILL.md"),
+				"---\nname: xlsx\n---\n\n# Sheets\n",
+			);
+			const skills = loadSkills(cwd);
+			expect(skills.map((skill) => skill.name)).toEqual(["frontend-design"]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	test("parseSkillMarkdown falls back to folder name", () => {
 		const skill = parseSkillMarkdown("# bare", "/tmp/skills/foo/SKILL.md", "/tmp/skills");
 		expect(skill.name).toBe("foo");
@@ -69,6 +90,16 @@ Body here.
 		} finally {
 			await rm(cwd, { recursive: true, force: true });
 		}
+	});
+
+	test("skips the package catalog when cwd/skills is that folder", () => {
+		const root = join(import.meta.dir, "../..");
+		expect(isBundledCatalogDir(bundledSkillsDir())).toBe(true);
+		const dirs = resolveHostSkillDirs(root, "skills");
+		expect(dirs.some((dir) => isBundledCatalogDir(dir))).toBe(false);
+		const merged = loadMergedSkills(dirs);
+		expect(merged.map((skill) => skill.name)).not.toContain("copywriting");
+		expect(merged.map((skill) => skill.name)).not.toContain("impeccable");
 	});
 
 	test("host skills override user skills of the same name", async () => {

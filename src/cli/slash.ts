@@ -10,9 +10,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 	{ name: "help", hint: "this list" },
 	{ name: "skills", hint: "loaded skills" },
 	{ name: "skill add", hint: "install a bundled or skills.sh skill", arg: true },
-	{ name: "skill find", hint: "search bundled skills and skills.sh", arg: true },
+	{ name: "skill find", hint: "browse bundled and skills.sh", arg: true, slot: "[query]" },
 	{ name: "skill new", hint: "author a project skill", arg: true },
 	{ name: "skill remove", hint: "remove a user skill", arg: true },
+	{ name: "integrations", hint: "connect MCP servers" },
 	{ name: "eval", hint: "run an eval suite", arg: true, slot: "[name]" },
 	{ name: "clear", hint: "new session" },
 	{ name: "resume", hint: "pick a session by title" },
@@ -60,6 +61,8 @@ export const PICKS_WHEN_EMPTY = new Set([
 	"image",
 	"video",
 	"transcribe",
+	"integrations",
+	"skill find",
 ]);
 
 /** Empty submit stays in the composer until the argument is typed. */
@@ -70,20 +73,27 @@ export type SlashSubmit =
 	| { action: "complete"; line: string }
 	| { action: "hold" };
 
+function acceptSlashChoice(command: SlashCommand): SlashSubmit {
+	if (REQUIRES_ARG.has(command.name)) {
+		return { action: "complete", line: completeSlashCommand(command) };
+	}
+	return { action: "send", line: `/${command.name}` };
+}
+
 /**
- * Enter on a slash line. Commands that still need an argument stay in the
- * composer. Unique prefixes complete. Unknown prefixes are not sent as chat.
+ * Enter on a slash line. A highlighted menu item is accepted even when the
+ * typed prefix is still ambiguous. Unique prefixes complete. Unknown prefixes
+ * are not sent as chat.
  */
-export function resolveSlashSubmit(raw: string): SlashSubmit | null {
+export function resolveSlashSubmit(raw: string, selected?: SlashCommand): SlashSubmit | null {
 	const trimmed = raw.trim();
 	if (!trimmed.startsWith("/") && !isHelpAlias(trimmed)) return null;
 	if (isHelpAlias(trimmed)) return { action: "send", line: "/help" };
-	if (trimmed === "/") return { action: "hold" };
 
 	const { cmd, arg } = parseSlashLine(trimmed);
 	const typed = trimmed.replace(/^\//, "").trim().toLowerCase();
 	const exact = SLASH_COMMANDS.find((item) => item.name === cmd);
-	if (exact && (typed === exact.name || typed.startsWith(`${exact.name} `))) {
+	if (exact && typed && (typed === exact.name || typed.startsWith(`${exact.name} `))) {
 		if (!arg && REQUIRES_ARG.has(exact.name)) {
 			return { action: "complete", line: completeSlashCommand(exact) };
 		}
@@ -92,6 +102,9 @@ export function resolveSlashSubmit(raw: string): SlashSubmit | null {
 	}
 
 	const matches = filterSlashCommands(trimmed);
+	if (selected && matches.some((item) => item.name === selected.name)) {
+		return acceptSlashChoice(selected);
+	}
 	if (matches.length === 1 && matches[0]) {
 		return { action: "complete", line: completeSlashCommand(matches[0]) };
 	}
@@ -110,8 +123,24 @@ export function isHelpAlias(text: string): boolean {
 }
 
 export function formatSkillList(skills: Array<{ name: string; source: string }>): string {
-	if (skills.length === 0) return "No skills loaded. /skill add copywriting or /skill find";
-	return skills.map((skill) => `${skill.name}  ${skill.source}`).join("\n");
+	if (skills.length === 0) {
+		return "No skills loaded. /skill add copywriting or /skill find";
+	}
+	return skills
+		.map((skill) => `${skill.name}  ${skill.source === "host" ? "project" : skill.source}`)
+		.join("\n");
+}
+
+export function formatIntegrationList(
+	items: Array<{ label: string; connected: boolean; auth?: string }>,
+): string {
+	if (items.length === 0) return "No integrations.";
+	return items
+		.map((item) => {
+			const state = item.connected ? "on" : "off";
+			return `${item.label}  ${state}`;
+		})
+		.join("\n");
 }
 
 export const SLASH_HELP = SLASH_COMMANDS.map(

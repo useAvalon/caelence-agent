@@ -1,5 +1,7 @@
 import { parseSkillNewArgs } from "./create-skill.ts";
 
+export const SKILL_FIND_HINT = "Empty find lists bundled skills and popular skills.sh hits.";
+
 export const SKILL_COMMAND_USAGE = [
 	"/skill find [query]",
 	"/skill add <name or owner/repo@skill>",

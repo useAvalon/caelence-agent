@@ -31,7 +31,7 @@ export function promptVersionMap(bodies: Record<string, string>): Record<string,
 	return out;
 }
 
-/** Git-backed copy / visual-QA skills shipped with the harness. */
+/** Git-backed copy / visual-QA skills shipped with the package. */
 export function harnessPromptRecords(): PromptRecord[] {
 	const dir = join(import.meta.dir, "..", "..", "skills");
 	const out: PromptRecord[] = [];

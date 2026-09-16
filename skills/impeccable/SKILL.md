@@ -12,7 +12,8 @@ description: >-
 # Impeccable checks
 
 Adapted from [Impeccable](https://github.com/pbakaus/impeccable) (Apache 2.0,
-Copyright 2025 Paul Bakaus). This skill is **not** a vendor of that repository.
+Copyright 2025 Paul Bakaus). Modified for this agent. See `NOTICE` and
+`LICENSE` in this folder. This skill is **not** a vendor of that repository.
 
 **Visual authority:** the host project's `docs/design.md` or `design.md` if
 either exists. Read it before changing UI. Do not dump a whole tokens file

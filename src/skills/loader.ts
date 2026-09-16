@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { Glob } from "bun";
 import { shouldSkipDir } from "../tools/paths.ts";
@@ -10,6 +10,8 @@ export interface Skill {
 	path: string;
 	relPath: string;
 	source: "bundled" | "host" | "user";
+	/** Catalog id this copy was installed from, e.g. anthropics/skills@frontend-design. */
+	catalogRef?: string;
 }
 
 export function stripFrontmatter(md: string): { attrs: Record<string, string>; body: string } {
@@ -62,6 +64,8 @@ function parseFrontmatter(raw: string): Record<string, string> {
 	return attrs;
 }
 
+export const SKILL_CATALOG_REF_FILE = ".catalog-ref";
+
 export function parseSkillMarkdown(md: string, absPath: string, root: string): Skill {
 	const { attrs, body } = stripFrontmatter(md);
 	const name = attrs.name?.trim() || dirname(absPath).split("/").pop() || "skill";
@@ -78,6 +82,19 @@ export function parseSkillMarkdown(md: string, absPath: string, root: string): S
 
 export function bundledSkillsDir(): string {
 	return join(import.meta.dir, "..", "..", "skills");
+}
+
+/** True when `abs` is the package catalog, not a host project overlay. */
+export function isBundledCatalogDir(abs: string): boolean {
+	const bundled = bundledSkillsDir();
+	try {
+		if (existsSync(abs) && existsSync(bundled)) {
+			return realpathSync(abs) === realpathSync(bundled);
+		}
+	} catch {
+		/* compare resolved paths below */
+	}
+	return resolve(abs) === resolve(bundled);
 }
 
 /** Later writers win. Used to overlay host skills on a catalog or user store. */
@@ -101,11 +118,14 @@ export function resolveHostSkillDirs(cwd: string, configured: string): string[] 
 	const out: string[] = [];
 	for (const rel of [configured, ...CONVENTIONAL_HOST_SKILL_DIRS]) {
 		const abs = resolve(cwd, rel);
-		if (seen.has(abs)) continue;
+		if (seen.has(abs) || isBundledCatalogDir(abs)) continue;
 		seen.add(abs);
 		if (existsSync(abs)) out.push(abs);
 	}
-	if (out.length === 0) out.push(resolve(cwd, configured));
+	if (out.length === 0) {
+		const fallback = resolve(cwd, configured);
+		if (!isBundledCatalogDir(fallback)) out.push(fallback);
+	}
 	return out;
 }
 
@@ -131,10 +151,17 @@ export function loadSkills(skillsDir: string): Skill[] {
 		const glob = new Glob("**/SKILL.md");
 		for (const rel of glob.scanSync({ cwd: skillsDir, onlyFiles: true, dot: false })) {
 			const parts = rel.split("/");
+			if (parts.length !== 2 || parts[1] !== "SKILL.md") continue;
 			if (parts.some((p) => shouldSkipDir(p))) continue;
 			const abs = join(skillsDir, rel);
 			const md = readFileSync(abs, "utf8");
-			skills.push(parseSkillMarkdown(md, abs, skillsDir));
+			const skill = parseSkillMarkdown(md, abs, skillsDir);
+			const catalogRefPath = join(dirname(abs), SKILL_CATALOG_REF_FILE);
+			if (existsSync(catalogRefPath)) {
+				const catalogRef = readFileSync(catalogRefPath, "utf8").trim();
+				if (catalogRef) skill.catalogRef = catalogRef;
+			}
+			skills.push(skill);
 		}
 	} catch {
 		return [];

@@ -7,8 +7,7 @@ A Tauri window around the same `createHarness` runtime as the terminal UI. The w
 Needs bun and Rust. System `rustup` works. A local toolchain can live in `desktop/.toolchain/` (gitignored).
 
 ```bash
-# from this repo, or any host with harness.config.ts
-export OPENROUTER_API_KEY=…
+# from this repo, or any project
 bun bin/harness.ts desktop
 ```
 
@@ -20,6 +19,8 @@ bun install
 bun run desktop
 ```
 
+Paste an OpenRouter key in Settings after the window opens. You do not need to export `OPENROUTER_API_KEY` in the terminal.
+
 `HARNESS_CWD` is the project the agent opens.
 
-The Ink TUI is unchanged: `bun bin/harness.ts`.
+The Ink TUI: `bun bin/harness.ts` (same as `caelence`).

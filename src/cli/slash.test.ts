@@ -4,6 +4,7 @@ import { plainTerminalText } from "./plain-text.ts";
 import {
 	completeSlashCommand,
 	filterSlashCommands,
+	formatIntegrationList,
 	formatSkillList,
 	formatSlashCommand,
 	isHelpAlias,
@@ -32,6 +33,7 @@ describe("slash palette", () => {
 		expect(filterSlashCommands("/mode").map((item) => item.name)).toEqual(["model", "mode"]);
 		expect(filterSlashCommands("/help").map((item) => item.name)).toEqual(["help"]);
 		expect(filterSlashCommands("/image").map((item) => item.name)).toEqual(["image"]);
+		expect(filterSlashCommands("/int").map((item) => item.name)).toEqual(["integrations"]);
 	});
 
 	test("puts argument slots on the command, not the hint", () => {
@@ -40,6 +42,7 @@ describe("slash palette", () => {
 		expect(formatSlashCommand(evalCmd!)).toBe("/eval [name]");
 		expect(SLASH_HELP).toContain("/eval [name] · run an eval suite");
 		expect(SLASH_HELP).toContain("/image [prompt] · generate an image");
+		expect(SLASH_HELP).toContain("/skill find [query] · browse bundled and skills.sh");
 		expect(SLASH_HELP).not.toContain("/eval ·");
 	});
 
@@ -72,14 +75,22 @@ describe("slash palette", () => {
 				source: "host",
 			},
 		] satisfies Skill[];
-		expect(formatSkillList(skills)).toBe("copywriting  host");
+		expect(formatSkillList(skills)).toBe("copywriting  project");
 		expect(formatSkillList(skills)).not.toContain("Routes copy");
+	});
+
+	test("lists integrations as name and on/off", () => {
+		expect(
+			formatIntegrationList([
+				{ label: "Linear", connected: true },
+				{ label: "Figma", connected: false, auth: "desktop" },
+			]),
+		).toBe("Linear  on\nFigma  off");
 	});
 });
 
 describe("resolveSlashSubmit", () => {
 	test("keeps commands that still need an argument in the composer", () => {
-		expect(resolveSlashSubmit("/skill find")).toEqual({ action: "send", line: "/skill find" });
 		expect(resolveSlashSubmit("/skill add")).toEqual({ action: "complete", line: "/skill add " });
 		expect(resolveSlashSubmit("/skill find billing")).toEqual({
 			action: "send",
@@ -97,9 +108,21 @@ describe("resolveSlashSubmit", () => {
 		expect(resolveSlashSubmit("/asdf")).toEqual({ action: "hold" });
 	});
 
+	test("sends the highlighted command when the prefix is still ambiguous", () => {
+		const integrations = SLASH_COMMANDS.find((item) => item.name === "integrations");
+		expect(integrations).toBeDefined();
+		expect(resolveSlashSubmit("/i", integrations)).toEqual({
+			action: "send",
+			line: "/integrations",
+		});
+		expect(resolveSlashSubmit("/i")).toEqual({ action: "hold" });
+	});
+
 	test("opens pickers for empty model, mode, and media commands", () => {
 		expect(resolveSlashSubmit("/image")).toEqual({ action: "send", line: "/image" });
 		expect(resolveSlashSubmit("/mode")).toEqual({ action: "send", line: "/mode" });
+		expect(resolveSlashSubmit("/integrations")).toEqual({ action: "send", line: "/integrations" });
+		expect(resolveSlashSubmit("/skill find")).toEqual({ action: "send", line: "/skill find" });
 		expect(resolveSlashSubmit("/settings")).toEqual({ action: "send", line: "/settings" });
 	});
 });

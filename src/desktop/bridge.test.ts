@@ -183,6 +183,30 @@ describe("desktop bridge", () => {
 		}
 	});
 
+	test("lists bundled skills without fetching skills.sh", async () => {
+		const ctx = await withBridge();
+		try {
+			const res = await fetch(`${ctx.ready.url}/skills`, { headers: ctx.headers });
+			expect(res.ok).toBe(true);
+			const body = (await res.json()) as {
+				bundled: Array<{ name: string; origin: string; status: string }>;
+				popular: Array<{ name: string; origin: string }>;
+			};
+			expect(
+				body.bundled.some((item) => item.name === "copywriting" && item.origin === "bundled"),
+			).toBe(true);
+			expect(body.popular.some((item) => item.origin === "skills.sh")).toBe(true);
+			const missing = await fetch(`${ctx.ready.url}/skills/add`, {
+				method: "POST",
+				headers: ctx.headers,
+				body: JSON.stringify({}),
+			});
+			expect(missing.status).toBe(400);
+		} finally {
+			await ctx.close();
+		}
+	});
+
 	test("lists MCP integrations without tokens", async () => {
 		const ctx = await withBridge();
 		try {

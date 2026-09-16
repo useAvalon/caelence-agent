@@ -21,6 +21,7 @@
   },
   "bin": {
     "harness": "./bin/harness.ts",
+    "caelence": "./bin/harness.ts",
     "caelence-agent": "./bin/harness.ts"
   },
   "exports": {
@@ -32,6 +33,7 @@
     "bin",
     "src",
     "skills",
+    "brand",
     "README.md"
   ],
   "scripts": {

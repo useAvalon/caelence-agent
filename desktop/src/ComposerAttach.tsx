@@ -1,13 +1,15 @@
-import { File as FileGlyph } from "@phosphor-icons/react/dist/csr/File";
-import { X } from "@phosphor-icons/react/dist/csr/X";
+import { FileIcon as FileGlyph } from "@phosphor-icons/react/dist/csr/File";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import type { AttachmentPreview, ComposerFileKind } from "./composer-files.ts";
 import { fileExtension } from "./composer-files.ts";
 
-export function AttachmentThumbs(props: {
-	items: Array<AttachmentPreview & { id?: string }>;
-	onRemove?: (index: number) => void;
-	variant?: "thumb" | "chat";
-}): React.ReactElement | null {
+export function AttachmentThumbs(
+	props: Readonly<{
+		items: Array<AttachmentPreview & { id?: string }>;
+		onRemove?: (index: number) => void;
+		variant?: "thumb" | "chat";
+	}>,
+): React.ReactElement | null {
 	if (props.items.length === 0) return null;
 	if (props.variant === "chat") {
 		return (
@@ -32,7 +34,7 @@ export function AttachmentThumbs(props: {
 							aria-label={`Remove ${item.name}`}
 							onClick={() => props.onRemove?.(index)}
 						>
-							<X size={12} weight="bold" />
+							<XIcon size={12} weight="bold" />
 						</button>
 					) : null}
 				</li>
@@ -41,11 +43,13 @@ export function AttachmentThumbs(props: {
 	);
 }
 
-function ChatPreview(props: {
-	name: string;
-	kind: ComposerFileKind;
-	previewUrl?: string;
-}): React.ReactElement {
+function ChatPreview(
+	props: Readonly<{
+		name: string;
+		kind: ComposerFileKind;
+		previewUrl?: string;
+	}>,
+): React.ReactElement {
 	if (props.kind === "image" && props.previewUrl) {
 		return (
 			<>
@@ -57,7 +61,9 @@ function ChatPreview(props: {
 	if (props.kind === "video" && props.previewUrl) {
 		return (
 			<>
-				<video className="desk-preview desk-preview--img" controls src={props.previewUrl} />
+				<video className="desk-preview desk-preview--img" controls src={props.previewUrl}>
+					<track kind="captions" srcLang="en" label="Captions" src="data:text/vtt,WEBVTT" />
+				</video>
 				<p className="desk-line__caption">{props.name}</p>
 			</>
 		);
@@ -71,11 +77,13 @@ function ChatPreview(props: {
 	);
 }
 
-function ThumbPreview(props: {
-	name: string;
-	kind: ComposerFileKind;
-	previewUrl?: string;
-}): React.ReactElement {
+function ThumbPreview(
+	props: Readonly<{
+		name: string;
+		kind: ComposerFileKind;
+		previewUrl?: string;
+	}>,
+): React.ReactElement {
 	if (props.kind === "image" && props.previewUrl) {
 		return <img className="desk-thumb__media" src={props.previewUrl} alt={props.name} />;
 	}
@@ -88,7 +96,9 @@ function ThumbPreview(props: {
 				playsInline
 				preload="metadata"
 				aria-label={props.name}
-			/>
+			>
+				<track kind="captions" srcLang="en" label="Captions" src="data:text/vtt,WEBVTT" />
+			</video>
 		);
 	}
 	return (

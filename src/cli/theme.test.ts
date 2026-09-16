@@ -7,4 +7,11 @@ describe("theme", () => {
 		expect(resolveTheme("plain").name).toBe(PLAIN_THEME.name);
 		expect(resolveTheme({ ...CAELENCE_THEME, danger: "#ff0000" }).danger).toBe("#ff0000");
 	});
+
+	test("uses instrument blue instead of brand green", () => {
+		expect(CAELENCE_THEME.brand).toBe("#6e93b8");
+		expect(CAELENCE_THEME.action).toBe("#6e93b8");
+		expect(CAELENCE_THEME.done).toBe("#6e93b8");
+		expect(PLAIN_THEME.brand).toBe("blue");
+	});
 });

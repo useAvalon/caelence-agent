@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { listBundledSkills, parseSkillMarkdown } from "./loader.ts";
+import { errorMessage } from "../core/errors.ts";
+import { listBundledSkills, parseSkillMarkdown, SKILL_CATALOG_REF_FILE } from "./loader.ts";
 
 /** Bare names that install more than one catalog folder. */
 export const BUNDLED_PACKS: Record<string, readonly string[]> = {
@@ -8,15 +9,67 @@ export const BUNDLED_PACKS: Record<string, readonly string[]> = {
 	copywriting: ["copywriting", "copy-rmbc", "copy-harry-dry", "copy-editor"],
 };
 
-const SEARCH_URL = (process.env.SKILLS_API_URL?.trim() || "https://skills.sh").replace(/\/+$/, "");
+function catalogPackNames(): string[] {
+	return Object.keys(BUNDLED_PACKS).filter((key) => key !== "copy");
+}
+
+/** Pipeline steps that are not addable on their own. */
+function packStepNames(): Set<string> {
+	const steps = new Set<string>();
+	for (const pack of catalogPackNames()) {
+		for (const member of BUNDLED_PACKS[pack] ?? []) {
+			if (member !== pack) steps.add(member);
+		}
+	}
+	return steps;
+}
+
+export function bundledPackStepNames(): Set<string> {
+	return packStepNames();
+}
+
+const SEARCH_URL = trimTrailingSlashes(process.env.SKILLS_API_URL?.trim() || "https://skills.sh");
 const MAX_FILES = 40;
 const MAX_FILE_BYTES = 512 * 1024;
+
+function trimTrailingSlashes(value: string): string {
+	let end = value.length;
+	while (end > 0 && value.endsWith("/")) {
+		value = value.slice(0, -1);
+		end = value.length;
+	}
+	return value;
+}
+
+function isRepoToken(value: string): boolean {
+	return /^[A-Za-z0-9_.-]+$/.test(value);
+}
+
+function parseGithubPath(pathname: string): ParsedSkillSource | undefined {
+	const parts = pathname.split("/").filter(Boolean);
+	const owner = parts[0];
+	const repoRaw = parts[1];
+	if (!owner || !repoRaw) return undefined;
+	const repo = repoRaw.replace(/\.git$/, "");
+	const kind = parts[2];
+	if (kind !== "tree" && kind !== "blob") return { owner, repo, ref: "HEAD" };
+	const ref = parts[3] || "HEAD";
+	const rest = parts.slice(4).join("/");
+	const path = trimTrailingSlashes(rest.replace(/\/SKILL\.md$/i, ""));
+	return {
+		owner,
+		repo,
+		ref,
+		...(path ? { path, skill: path.split("/").pop() } : {}),
+	};
+}
 
 export interface RegistryHit {
 	name: string;
 	source: string;
 	installs?: number;
 	id: string;
+	description?: string;
 }
 
 export interface ParsedSkillSource {
@@ -29,61 +82,74 @@ export interface ParsedSkillSource {
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
+function parseHttpSkillSource(
+	value: string,
+): ParsedSkillSource | { url: string } | { error: string } {
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return { url: value };
+	}
+	const host = url.hostname.toLowerCase();
+	if (host === "skills.sh" || host === "www.skills.sh") {
+		return parseSkillSource(trimTrailingSlashes(url.pathname).replace(/^\//, ""));
+	}
+	if (host === "github.com" || host === "www.github.com") {
+		const parsed = parseGithubPath(url.pathname);
+		if (parsed) return parsed;
+	}
+	if (host === "raw.githubusercontent.com") {
+		const parts = url.pathname.split("/").filter(Boolean);
+		const owner = parts[0];
+		const repo = parts[1];
+		const ref = parts[2] || "HEAD";
+		const path = parts
+			.slice(3)
+			.join("/")
+			.replace(/\/SKILL\.md$/i, "");
+		if (owner && repo) return { owner, repo, ref, ...(path ? { path } : {}) };
+	}
+	return { url: value };
+}
+
+function parseOwnerRepo(value: string): ParsedSkillSource | undefined {
+	const at = value.indexOf("@");
+	if (at > 0) {
+		const left = value.slice(0, at);
+		const skill = value.slice(at + 1);
+		const slash = left.indexOf("/");
+		if (slash > 0) {
+			const owner = left.slice(0, slash);
+			const repo = left.slice(slash + 1);
+			if (isRepoToken(owner) && isRepoToken(repo) && skill) {
+				return { owner, repo, skill, ref: "HEAD" };
+			}
+		}
+	}
+	const parts = value.split("/");
+	const owner = parts[0];
+	const repo = parts[1];
+	if (!owner || !repo || !isRepoToken(owner) || !isRepoToken(repo)) return undefined;
+	const path = trimTrailingSlashes(parts.slice(2).join("/"));
+	return {
+		owner,
+		repo,
+		ref: "HEAD",
+		...(path ? { path, skill: path.split("/").pop() } : {}),
+	};
+}
+
 export function parseSkillSource(
 	raw: string,
 ): ParsedSkillSource | { url: string } | { error: string } {
 	const value = raw.trim();
 	if (!value) return { error: "Source is empty." };
-
-	const skillsSh = /^https?:\/\/(?:www\.)?skills\.sh\/([^?#]+)$/i.exec(value);
-	if (skillsSh?.[1]?.includes("/")) {
-		return parseSkillSource(skillsSh[1].replace(/\/+$/, ""));
+	if (value.startsWith("http://") || value.startsWith("https://")) {
+		return parseHttpSkillSource(value);
 	}
-
-	if (/^https?:\/\//i.test(value)) {
-		const github =
-			/^https?:\/\/github\.com\/([^/]+)\/([^/]+)(?:\/(?:tree|blob)\/([^/]+)(?:\/(.*))?)?/i.exec(
-				value,
-			);
-		if (github) {
-			const path = github[4]?.replace(/\/SKILL\.md$/i, "").replace(/\/+$/, "");
-			return {
-				owner: github[1] ?? "",
-				repo: (github[2] ?? "").replace(/\.git$/, ""),
-				ref: github[3] || "HEAD",
-				...(path ? { path } : {}),
-				...(path ? { skill: path.split("/").pop() } : {}),
-			};
-		}
-		const rawGh = /^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.*)$/i.exec(
-			value,
-		);
-		if (rawGh) {
-			const path = (rawGh[4] ?? "").replace(/\/SKILL\.md$/i, "");
-			return {
-				owner: rawGh[1] ?? "",
-				repo: rawGh[2] ?? "",
-				ref: rawGh[3] || "HEAD",
-				...(path ? { path } : {}),
-			};
-		}
-		return { url: value };
-	}
-
-	const at = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)@([A-Za-z0-9_./-]+)$/.exec(value);
-	if (at) {
-		return { owner: at[1] ?? "", repo: at[2] ?? "", skill: at[3], ref: "HEAD" };
-	}
-	const repo = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\/(.+))?$/.exec(value);
-	if (repo) {
-		const path = repo[3]?.replace(/\/+$/, "");
-		return {
-			owner: repo[1] ?? "",
-			repo: repo[2] ?? "",
-			ref: "HEAD",
-			...(path ? { path, skill: path.split("/").pop() } : {}),
-		};
-	}
+	const parsed = parseOwnerRepo(value);
+	if (parsed) return parsed;
 	return {
 		error: "Use a bundled name, owner/repo, owner/repo@skill, or a GitHub / skills.sh URL.",
 	};
@@ -92,9 +158,9 @@ export function parseSkillSource(
 export function parseBundledSkillRef(raw: string): string | undefined {
 	const value = raw.trim();
 	if (!value) return undefined;
-	const tagged = /^(?:bundled[@/])([A-Za-z0-9_.-]+)$/i.exec(value);
+	const tagged = /^(?:bundled[@/])([a-z0-9_.-]+)$/i.exec(value);
 	if (tagged?.[1]) return tagged[1];
-	if (/^[A-Za-z0-9_.-]+$/.test(value)) return value;
+	if (isRepoToken(value) && !value.includes("/")) return value;
 	return undefined;
 }
 
@@ -103,6 +169,10 @@ export function bundledInstallNames(name: string): string[] | undefined {
 	if (!key) return undefined;
 	const pack = BUNDLED_PACKS[key];
 	if (pack) return [...pack];
+	for (const packName of catalogPackNames()) {
+		const members = BUNDLED_PACKS[packName] ?? [];
+		if (members.some((member) => member === key)) return [...members];
+	}
 	const found = listBundledSkills().find((skill) => skill.name.toLowerCase() === key);
 	return found ? [found.name] : undefined;
 }
@@ -111,8 +181,10 @@ export function bundledRegistryHits(query: string): RegistryHit[] {
 	const q = query.trim().toLowerCase();
 	const seen = new Set<string>();
 	const hits: RegistryHit[] = [];
-	for (const pack of Object.keys(BUNDLED_PACKS)) {
-		if (pack === "copy") continue;
+	const catalog = listBundledSkills();
+	const byName = new Map(catalog.map((skill) => [skill.name.toLowerCase(), skill]));
+	const steps = packStepNames();
+	for (const pack of catalogPackNames()) {
 		const members = BUNDLED_PACKS[pack] ?? [];
 		if (
 			q &&
@@ -123,14 +195,27 @@ export function bundledRegistryHits(query: string): RegistryHit[] {
 			continue;
 		}
 		seen.add(pack);
-		hits.push({ id: `bundled/${pack}`, name: pack, source: "bundled" });
+		const skill = byName.get(pack);
+		hits.push({
+			id: `bundled/${pack}`,
+			name: pack,
+			source: "bundled",
+			...(skill?.description ? { description: skill.description } : {}),
+		});
 	}
-	for (const skill of listBundledSkills()) {
+	for (const skill of catalog) {
 		const key = skill.name.toLowerCase();
-		if (q && q !== "bundled" && !key.includes(q)) continue;
-		if (seen.has(key)) continue;
+		if (steps.has(key) || seen.has(key)) continue;
+		if (q && q !== "bundled" && !key.includes(q) && !skill.description.toLowerCase().includes(q)) {
+			continue;
+		}
 		seen.add(key);
-		hits.push({ id: `bundled/${skill.name}`, name: skill.name, source: "bundled" });
+		hits.push({
+			id: `bundled/${skill.name}`,
+			name: skill.name,
+			source: "bundled",
+			description: skill.description,
+		});
 	}
 	return hits;
 }
@@ -139,15 +224,53 @@ export function formatBundledHits(hits: RegistryHit[]): string {
 	return hits.map((hit) => `bundled@${hit.name}`).join("\n");
 }
 
-export async function searchSkills(query: string, fetchFn: FetchLike = fetch): Promise<string> {
-	const bundled = formatBundledHits(bundledRegistryHits(query));
+export function skillCatalogRef(hit: RegistryHit): string {
+	if (hit.source === "bundled") return `bundled@${hit.name}`;
+	return `${hit.source}@${hit.name}`;
+}
+
+/** True when this loaded skill is the catalog row, not another skill with the same name. */
+export function skillIsCatalogHit(
+	skill: { name: string; source: string; catalogRef?: string },
+	hit: RegistryHit,
+): boolean {
+	const ref = skillCatalogRef(hit);
+	if (skill.catalogRef) return skill.catalogRef === ref || skill.catalogRef === hit.id;
+	if (skill.source === "user") {
+		return (
+			skill.name.toLowerCase() === hit.name.toLowerCase() &&
+			(hit.source === "user" || hit.source === "project")
+		);
+	}
+	return skill.name.toLowerCase() === hit.name.toLowerCase();
+}
+
+export async function searchSkillCatalog(
+	query: string,
+	fetchFn: FetchLike = fetch,
+): Promise<RegistryHit[]> {
+	const bundled = bundledRegistryHits(query);
 	try {
-		const remote = await searchSkillsSh(query, fetchFn);
-		const remoteText = remote.length > 0 ? formatRegistryHits(remote) : "";
-		return [bundled, remoteText].filter(Boolean).join("\n") || "No matches.";
+		const remote = await searchSkillsSh(query, fetchFn, { limit: 16 });
+		const seen = new Set(bundled.map((hit) => skillCatalogRef(hit)));
+		return [...bundled, ...remote.filter((hit) => !seen.has(skillCatalogRef(hit)))];
 	} catch (err) {
-		if (bundled) return bundled;
-		return err instanceof Error ? err.message : String(err);
+		if (bundled.length > 0) return bundled;
+		throw err;
+	}
+}
+
+export async function searchSkills(query: string, fetchFn: FetchLike = fetch): Promise<string> {
+	try {
+		const hits = await searchSkillCatalog(query, fetchFn);
+		if (hits.length === 0) return "No matches.";
+		const bundled = hits.filter((hit) => hit.source === "bundled");
+		const remote = hits.filter((hit) => hit.source !== "bundled");
+		return [formatBundledHits(bundled), remote.length > 0 ? formatRegistryHits(remote) : ""]
+			.filter(Boolean)
+			.join("\n");
+	} catch (err) {
+		return errorMessage(err);
 	}
 }
 
@@ -158,10 +281,7 @@ export function installBundledSkills(
 	const names = bundledInstallNames(name);
 	const catalog = listBundledSkills();
 	if (!names) {
-		const choices = [
-			...Object.keys(BUNDLED_PACKS).filter((key) => key !== "copy"),
-			...catalog.map((skill) => skill.name),
-		].filter((value, index, all) => all.indexOf(value) === index);
+		const choices = bundledRegistryHits("").map((hit) => hit.name);
 		return { error: `No bundled skill ${JSON.stringify(name)}.`, choices };
 	}
 	const byName = new Map(catalog.map((skill) => [skill.name.toLowerCase(), skill]));
@@ -179,8 +299,9 @@ export function installBundledSkills(
 		try {
 			rmSync(dest, { recursive: true, force: true });
 			cpSync(dirname(skill.path), dest, { recursive: true });
+			writeFileSync(join(dest, SKILL_CATALOG_REF_FILE), `bundled@${slug}\n`);
 		} catch (err) {
-			return { error: err instanceof Error ? err.message : String(err) };
+			return { error: errorMessage(err) };
 		}
 		installed.push(slug);
 	}
@@ -191,10 +312,12 @@ export function installBundledSkills(
 export async function searchSkillsSh(
 	query: string,
 	fetchFn: FetchLike = fetch,
+	options: { limit?: number } = {},
 ): Promise<RegistryHit[]> {
 	const q = query.trim();
 	if (!q) return [];
-	const url = `${SEARCH_URL}/api/search?${new URLSearchParams({ q, limit: "10" }).toString()}`;
+	const limit = String(Math.min(Math.max(options.limit ?? 10, 1), 20));
+	const url = `${SEARCH_URL}/api/search?${new URLSearchParams({ q, limit }).toString()}`;
 	const res = await fetchFn(url, { headers: { accept: "application/json" } });
 	if (!res.ok) throw new Error(`skills.sh search failed (${res.status})`);
 	const data = (await res.json()) as {
@@ -237,11 +360,17 @@ export async function installSkillFromSource(input: {
 	if ("url" in parsed)
 		return installFromDirectUrl(parsed.url, input.destRoot, input.fetchFn ?? fetch);
 	const skill = input.skill?.trim() || parsed.skill;
+	const catalogRef = input.source.includes("@")
+		? input.source
+		: skill
+			? `${parsed.owner}/${parsed.repo}@${skill}`
+			: `${parsed.owner}/${parsed.repo}`;
 	return installFromGithub({
 		...parsed,
 		skill,
 		destRoot: input.destRoot,
 		fetchFn: input.fetchFn ?? fetch,
+		catalogRef,
 	});
 }
 
@@ -260,11 +389,31 @@ async function installFromDirectUrl(
 	return writeSkillDir(destRoot, parsed.name, { "SKILL.md": markdown });
 }
 
+function skillFolderName(path: string, repo: string): string {
+	return dirname(path) === "." ? repo : (dirname(path).split("/").pop() ?? path);
+}
+
+function skillPathMatches(path: string, wanted: string, input: ParsedSkillSource): boolean {
+	const folder = skillFolderName(path, input.repo);
+	if (folder.toLowerCase() !== wanted) return false;
+	const lower = path.toLowerCase();
+	if (input.path) {
+		const prefix = input.path.toLowerCase().replace(/\/+$/, "");
+		return lower === `${prefix}/skill.md` || lower.startsWith(`${prefix}/`);
+	}
+	return lower === `${wanted}/skill.md` || lower.endsWith(`/${wanted}/skill.md`);
+}
+
+function pickSkillMd(matches: string[]): string {
+	return [...matches].sort((a, b) => a.length - b.length || a.localeCompare(b))[0] ?? "";
+}
+
 async function installFromGithub(
 	input: ParsedSkillSource & {
 		destRoot: string;
 		fetchFn: FetchLike;
 		skill?: string;
+		catalogRef?: string;
 	},
 ): Promise<{ name: string; rel: string } | { error: string; choices?: string[] }> {
 	const treeUrl = `https://api.github.com/repos/${input.owner}/${input.repo}/git/trees/${input.ref}?recursive=1`;
@@ -287,35 +436,23 @@ async function installFromGithub(
 
 	const wanted = input.skill?.toLowerCase() || input.path?.split("/").pop()?.toLowerCase();
 	const matches = wanted
-		? skillFiles.filter((path) => {
-				const folder = dirname(path) === "." ? input.repo : dirname(path).split("/").pop();
-				return (
-					folder?.toLowerCase() === wanted ||
-					path.toLowerCase() === `${wanted}/skill.md` ||
-					path.toLowerCase().endsWith(`/${wanted}/skill.md`) ||
-					(input.path && path.toLowerCase().startsWith(`${input.path.toLowerCase()}/`))
-				);
-			})
+		? skillFiles.filter((path) => skillPathMatches(path, wanted, input))
 		: skillFiles;
 
 	if (matches.length === 0) {
 		return {
 			error: `No skill ${JSON.stringify(input.skill)} in ${input.owner}/${input.repo}.`,
-			choices: skillFiles.map((path) =>
-				dirname(path) === "." ? input.repo : (dirname(path).split("/").pop() ?? path),
-			),
+			choices: skillFiles.map((path) => skillFolderName(path, input.repo)),
 		};
 	}
 	if (matches.length > 1 && !wanted) {
 		return {
 			error: "Repo has several skills. Add @name.",
-			choices: matches.map((path) =>
-				dirname(path) === "." ? input.repo : (dirname(path).split("/").pop() ?? path),
-			),
+			choices: matches.map((path) => skillFolderName(path, input.repo)),
 		};
 	}
 
-	const skillMd = matches[0] ?? "";
+	const skillMd = pickSkillMd(matches);
 	const root = dirname(skillMd) === "." ? "" : dirname(skillMd);
 	const files = (data.tree ?? [])
 		.map((node) => node.path ?? "")
@@ -324,6 +461,23 @@ async function installFromGithub(
 		);
 	if (files.length > MAX_FILES) return { error: `Skill has more than ${MAX_FILES} files.` };
 
+	const downloaded = await downloadSkillFiles(input, files, skillMd, root);
+	if ("error" in downloaded) return downloaded;
+	const markdown = downloaded.files["SKILL.md"];
+	if (!markdown) return { error: "Could not download SKILL.md." };
+	const name = parseSkillMarkdown(markdown, "SKILL.md", ".").name;
+	const catalogRef =
+		input.catalogRef?.trim() ||
+		(input.skill ? `${input.owner}/${input.repo}@${input.skill}` : undefined);
+	return writeSkillDir(input.destRoot, name, downloaded.files, catalogRef);
+}
+
+async function downloadSkillFiles(
+	input: ParsedSkillSource & { fetchFn: FetchLike },
+	files: string[],
+	skillMd: string,
+	root: string,
+): Promise<{ files: Record<string, string> } | { error: string }> {
 	const downloaded: Record<string, string> = {};
 	for (const path of files) {
 		if (!path.endsWith(".md") && !path.endsWith(".txt") && path !== skillMd) continue;
@@ -336,16 +490,14 @@ async function installFromGithub(
 		if (!rel || rel.includes("..")) continue;
 		downloaded[rel] = text;
 	}
-	const markdown = downloaded["SKILL.md"];
-	if (!markdown) return { error: "Could not download SKILL.md." };
-	const name = parseSkillMarkdown(markdown, "SKILL.md", ".").name;
-	return writeSkillDir(input.destRoot, name, downloaded);
+	return { files: downloaded };
 }
 
 function writeSkillDir(
 	destRoot: string,
 	name: string,
 	files: Record<string, string>,
+	catalogRef?: string,
 ): { name: string; rel: string } | { error: string } {
 	const slug = name
 		.trim()
@@ -363,8 +515,11 @@ function writeSkillDir(
 			mkdirSync(dirname(abs), { recursive: true });
 			writeFileSync(abs, body, "utf8");
 		}
+		if (catalogRef?.trim()) {
+			writeFileSync(join(dest, SKILL_CATALOG_REF_FILE), `${catalogRef.trim()}\n`);
+		}
 	} catch (err) {
-		return { error: err instanceof Error ? err.message : String(err) };
+		return { error: errorMessage(err) };
 	}
 	return { name: slug, rel: `${slug}/SKILL.md` };
 }
@@ -381,7 +536,7 @@ export function removeInstalledSkill(
 		rmSync(dest, { recursive: true, force: true });
 		return { removed: true };
 	} catch (err) {
-		return { removed: false, reason: err instanceof Error ? err.message : String(err) };
+		return { removed: false, reason: errorMessage(err) };
 	}
 }
 
