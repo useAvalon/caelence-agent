@@ -1,6 +1,6 @@
 {
   "name": "@useavalon/caelence-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Caelence agent: Strands turn loop, local tools, skills, evals, and a themable terminal UI.",
   "type": "module",
   "license": "MIT",
