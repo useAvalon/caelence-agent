@@ -1,6 +1,7 @@
 node_modules
 dist
 src-tauri/target
+src-tauri/gen
 .toolchain
 src-tauri/icons/icon.iconset
 src-tauri/icons/icon.ppm

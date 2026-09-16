@@ -20,9 +20,9 @@
     "bun": ">=1.2.0"
   },
   "bin": {
-    "harness": "./bin/harness.ts",
     "caelence": "./bin/harness.ts",
-    "caelence-agent": "./bin/harness.ts"
+    "caelence-agent": "./bin/harness.ts",
+    "harness": "./bin/harness.ts"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -34,6 +34,7 @@
     "src",
     "skills",
     "brand",
+    "desktop",
     "README.md"
   ],
   "scripts": {
@@ -44,7 +45,7 @@
     "format": "biome format --write .",
     "check": "biome check --write .",
     "check:exports": "node scripts/check-exports.mjs",
-    "prepare": "husky",
+    "prepare": "[ -d .git ] && husky || true",
     "prepublishOnly": "bun run typecheck && bun run test && bun run check:exports",
     "desktop": "bun src/cli/main.ts desktop"
   },

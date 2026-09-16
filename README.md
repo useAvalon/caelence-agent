@@ -11,11 +11,10 @@ The package is [`@useavalon/caelence-agent`](https://www.npmjs.com/package/@usea
 ## Install
 
 ```bash
-bun add -g @useavalon/caelence-agent
-caelence desktop
+bunx --bun @useavalon/caelence-agent desktop
 ```
 
-`caelence desktop` starts the desktop app, and you paste an OpenRouter key in Settings. The window build needs [Rust](https://rustup.rs) on the machine.
+That starts the desktop app, and you paste an OpenRouter key in Settings. The window build needs [Rust](https://rustup.rs) on the machine.
 
 <p align="center">
 	<img src="brand/previews/desktop-chat.png" alt="Desktop chat" width="720" />
@@ -25,10 +24,10 @@ For the terminal UI:
 
 ```bash
 export OPENROUTER_API_KEY=…
-caelence
+bunx --bun @useavalon/caelence-agent
 ```
 
-`caelence` starts the terminal UI. Run it from a git repository and that repo is the project; otherwise files are kept under `~/.harness/workspace`. `--cwd` overrides both. `caelence-agent` and `harness` are the same command.
+`bun add -g @useavalon/caelence-agent` installs the short names `caelence` and `caelence desktop`. Those only work when Bun already put `~/.bun/bin` on PATH. Homebrew usually does not, which is why this README starts with `bunx`. `caelence-agent` and `harness` are the same command. Run it from a git repository and that repo is the project; otherwise files are kept under `~/.harness/workspace`. `--cwd` overrides both.
 
 ## Config
 
@@ -189,7 +188,7 @@ If you only need types or tracing, `HarnessConfig` / `loadConfig` and the observ
 
 ## Contributing
 
-Bugs and feature ideas go through GitHub issues. Code from outside the org comes in as a fork and a pull request against `main`. The maintainer reviews before merge. See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports use a [private advisory](https://github.com/useAvalon/caelence-agent/security/advisories/new), not a public issue.
+Bugs and feature ideas go through GitHub issues. Code from outside the org comes in as a fork and a pull request against `main`. The maintainer reviews before merge. See [CONTRIBUTING.md](CONTRIBUTING.md). Agents working in this repo should follow [AGENTS.md](AGENTS.md). Security reports use a [private advisory](https://github.com/useAvalon/caelence-agent/security/advisories/new), not a public issue.
 
 ## License
 

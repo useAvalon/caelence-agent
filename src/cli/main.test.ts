@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseCliArgs } from "./main.ts";
 
 describe("parseCliArgs", () => {
@@ -25,6 +27,10 @@ describe("parseCliArgs", () => {
 		const parsed = parseCliArgs(["desktop", "--cwd", "/tmp/proj"]);
 		expect(parsed.cmd).toBe("desktop");
 		expect(parsed.cwd).toContain("proj");
+	});
+
+	test("desktop app files sit next to src", () => {
+		expect(existsSync(resolve(import.meta.dir, "../../desktop/package.json"))).toBe(true);
 	});
 
 	test("reads --mode", () => {
