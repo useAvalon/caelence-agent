@@ -33,7 +33,12 @@ import {
 	refreshPopularSkills,
 	withDisabledCatalogSkills,
 } from "../skills/catalog.ts";
-import { searchSkillCatalog } from "../skills/registry.ts";
+import {
+	findSkillForCatalogId,
+	isBundledCatalogId,
+	searchSkillCatalog,
+	skillNameFromCatalogId,
+} from "../skills/registry.ts";
 import { openResolvedPath, resolveLocalPath } from "./open-local.ts";
 import { readPreviewCache, writePreviewCache } from "./preview-cache.ts";
 import { applyStoredOpenRouterKey, maskSecret, writeOpenRouterKey } from "./secrets.ts";
@@ -423,20 +428,16 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		const body = await readJson(req);
 		const id = typeof body.id === "string" ? body.id.trim() : "";
 		if (!id) return json({ error: "id is required." }, 400);
-		const name = id.split("@").pop()?.trim() ?? id;
-		if (harness.disabledSkills().some((entry) => entry === name.toLowerCase())) {
+		const name = skillNameFromCatalogId(id);
+		if (isBundledCatalogId(id) && harness.disabledSkills().includes(name.toLowerCase())) {
 			harness.enableSkill(name);
 			return json({ ok: true, ...skillsPage() });
 		}
-		const loaded =
-			harness.skills.find((skill) => skill.catalogRef === id) ??
-			harness.skills.find(
-				(skill) => skill.source !== "user" && skill.name.toLowerCase() === name.toLowerCase(),
-			);
-		if (loaded && loaded.source !== "user") {
+		const loaded = findSkillForCatalogId(harness.skills, id);
+		if (loaded?.source !== "user" && loaded) {
 			return json({ error: `${loaded.name} is already in the project.` }, 400);
 		}
-		if (!loaded || loaded.catalogRef !== id) {
+		if (!loaded) {
 			const result = await harness.addSkill(id);
 			if ("error" in result) return json({ error: result.error }, 400);
 		}
@@ -447,9 +448,9 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		const body = await readJson(req);
 		const id = typeof body.id === "string" ? body.id.trim() : "";
 		const name =
-			(typeof body.name === "string" ? body.name.trim() : "") || id.split("@").pop()?.trim() || "";
+			(typeof body.name === "string" ? body.name.trim() : "") || id || skillNameFromCatalogId(id);
 		if (!name) return json({ error: "name is required." }, 400);
-		const result = harness.removeSkill(name);
+		const result = harness.removeSkill(id || name);
 		if (!result.ok) return json({ error: result.error ?? "Could not remove." }, 400);
 		return json({ ok: true, ...skillsPage() });
 	};

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +6,9 @@ import { join } from "node:path";
 import { loadMergedSkills } from "./loader.ts";
 import {
 	bundledRegistryHits,
+	catalogNameFitsGithubFolders,
+	clearGithubSkillFolderCache,
+	dropUninstallableCatalogHits,
 	formatRegistryHits,
 	installBundledSkills,
 	installSkillFromSource,
@@ -17,6 +20,10 @@ import {
 	searchSkillsSh,
 } from "./registry.ts";
 import { parseSkillCommand } from "./skill-command.ts";
+
+afterEach(() => {
+	clearGithubSkillFolderCache();
+});
 
 describe("parseSkillSource", () => {
 	test("accepts owner/repo@skill and skills.sh urls", () => {
@@ -30,6 +37,19 @@ describe("parseSkillSource", () => {
 			owner: "anthropics",
 			repo: "skills",
 			skill: "frontend-design",
+		});
+		expect(parseSkillSource("anthropics/skills/frontend-design")).toMatchObject({
+			owner: "anthropics",
+			repo: "skills",
+			skill: "frontend-design",
+		});
+		expect(parseSkillSource("smithery.ai@frontend-design")).toMatchObject({
+			error:
+				"smithery.ai@frontend-design is listed on skills.sh but is not a GitHub repo, so it cannot be added.",
+		});
+		expect(parseSkillSource("smithery.ai/frontend-design")).toMatchObject({
+			error:
+				"smithery.ai/frontend-design is listed on skills.sh but is not a GitHub repo, so it cannot be added.",
 		});
 	});
 });
@@ -84,6 +104,178 @@ describe("searchSkillsSh", () => {
 		});
 		expect(formatRegistryHits(hits)).toBe("anthropics/skills@frontend-design  10");
 	});
+
+	test("drops skills.sh hosts that are not GitHub repos", async () => {
+		const hits = await searchSkillsSh(
+			"frontend-design",
+			async () =>
+				new Response(
+					JSON.stringify({
+						skills: [
+							{
+								id: "smithery.ai/frontend-design",
+								name: "frontend-design",
+								source: "smithery.ai",
+								installs: 6216,
+							},
+							{
+								id: "anthropics/skills/frontend-design",
+								name: "frontend-design",
+								source: "anthropics/skills",
+								installs: 10,
+							},
+						],
+					}),
+				),
+		);
+		expect(hits.map((hit) => hit.source)).toEqual(["anthropics/skills"]);
+	});
+
+	test("drops skills.sh names that are not in that GitHub repo", async () => {
+		const hits = await searchSkillsSh("frontend", async (url) => {
+			const href = String(url);
+			if (href.includes("/repos/openai/skills/git/trees/")) {
+				return Response.json({
+					tree: [
+						{ path: "skills/aspnet-core/SKILL.md", type: "blob" },
+						{ path: "skills/chatgpt-apps/SKILL.md", type: "blob" },
+						{ path: "skills/skill-creator/SKILL.md", type: "blob" },
+					],
+				});
+			}
+			if (href.includes("/repos/pbakaus/impeccable/git/trees/")) {
+				return Response.json({
+					tree: [{ path: "SKILL.md", type: "blob" }],
+				});
+			}
+			if (href.includes("/repos/anthropics/skills/git/trees/")) {
+				return Response.json({
+					tree: [{ path: "skills/frontend-design/SKILL.md", type: "blob" }],
+				});
+			}
+			return Response.json({
+				skills: [
+					{
+						id: "openai/skills/frontend-skill",
+						name: "frontend-skill",
+						source: "openai/skills",
+						installs: 1600,
+					},
+					{
+						id: "openai/skills/chatgpt-apps",
+						name: "chatgpt-apps",
+						source: "openai/skills",
+						installs: 12,
+					},
+					{
+						id: "pbakaus/impeccable/frontend-design",
+						name: "frontend-design",
+						source: "pbakaus/impeccable",
+						installs: 40,
+					},
+					{
+						id: "anthropics/skills/frontend-design",
+						name: "frontend-design",
+						source: "anthropics/skills",
+						installs: 10,
+					},
+				],
+			});
+		});
+		expect(hits.map((hit) => `${hit.source}/${hit.name}`)).toEqual([
+			"openai/skills/chatgpt-apps",
+			"pbakaus/impeccable/frontend-design",
+			"anthropics/skills/frontend-design",
+		]);
+	});
+});
+
+describe("catalogNameFitsGithubFolders", () => {
+	test("keeps YAML catalog names and drops generic ghosts", () => {
+		expect(
+			catalogNameFitsGithubFolders("frontend-skill", [
+				"aspnet-core",
+				"chatgpt-apps",
+				"skill-creator",
+			]),
+		).toBe(false);
+		expect(catalogNameFitsGithubFolders("chatgpt-apps", ["aspnet-core", "chatgpt-apps"])).toBe(
+			true,
+		);
+		expect(
+			catalogNameFitsGithubFolders("design-taste-frontend-v1", [
+				"brandkit",
+				"brutalist-skill",
+				"taste-skill",
+				"taste-skill-v1",
+			]),
+		).toBe(true);
+		expect(catalogNameFitsGithubFolders("frontend-design", ["impeccable"])).toBe(true);
+	});
+
+	test("hides a name after GitHub confirms it is not in the repo", async () => {
+		const home = await mkdtemp(join(tmpdir(), "harness-missing-"));
+		const dest = await mkdtemp(join(tmpdir(), "harness-user-skills-"));
+		const prev = process.env.HARNESS_HOME;
+		process.env.HARNESS_HOME = home;
+		clearGithubSkillFolderCache();
+		try {
+			const result = await installSkillFromSource({
+				source: "openai/skills@frontend-skill",
+				destRoot: dest,
+				fetchFn: async (url) => {
+					if (url.includes("/git/trees/")) {
+						return Response.json({
+							tree: [
+								{ path: "skills/aspnet-core/SKILL.md", type: "blob" },
+								{ path: "skills/chatgpt-apps/SKILL.md", type: "blob" },
+							],
+						});
+					}
+					return new Response("missing", { status: 404 });
+				},
+			});
+			expect(result).toMatchObject({ error: 'No skill "frontend-skill" in openai/skills.' });
+			expect(
+				dropUninstallableCatalogHits([
+					{
+						id: "openai/skills/frontend-skill",
+						name: "frontend-skill",
+						source: "openai/skills",
+					},
+					{
+						id: "openai/skills/chatgpt-apps",
+						name: "chatgpt-apps",
+						source: "openai/skills",
+					},
+				]).map((hit) => hit.name),
+			).toEqual(["chatgpt-apps"]);
+			const hits = await searchSkillsSh("frontend", async (url) => {
+				if (String(url).includes("/git/trees/")) return new Response("no", { status: 403 });
+				return Response.json({
+					skills: [
+						{
+							id: "openai/skills/frontend-skill",
+							name: "frontend-skill",
+							source: "openai/skills",
+						},
+						{
+							id: "openai/skills/chatgpt-apps",
+							name: "chatgpt-apps",
+							source: "openai/skills",
+						},
+					],
+				});
+			});
+			expect(hits.map((hit) => hit.name)).toEqual(["chatgpt-apps"]);
+		} finally {
+			clearGithubSkillFolderCache();
+			if (prev === undefined) delete process.env.HARNESS_HOME;
+			else process.env.HARNESS_HOME = prev;
+			await rm(home, { recursive: true, force: true });
+			await rm(dest, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("installSkillFromSource", () => {
@@ -111,10 +303,12 @@ describe("installSkillFromSource", () => {
 					return new Response("missing", { status: 404 });
 				},
 			});
-			expect(result).toEqual({ name: "hello", rel: "hello/SKILL.md" });
-			const body = await readFile(join(dest, "hello", "SKILL.md"), "utf8");
+			expect(result).toEqual({ name: "hello", rel: "acme-pack-hello/SKILL.md" });
+			const body = await readFile(join(dest, "acme-pack-hello", "SKILL.md"), "utf8");
 			expect(body).toContain("# Hello");
-			expect(await readFile(join(dest, "hello", ".catalog-ref"), "utf8")).toBe("acme/pack@hello\n");
+			expect(await readFile(join(dest, "acme-pack-hello", ".catalog-ref"), "utf8")).toBe(
+				"acme/pack@hello\n",
+			);
 		} finally {
 			await rm(dest, { recursive: true, force: true });
 		}
@@ -150,11 +344,233 @@ describe("installSkillFromSource", () => {
 					return new Response("missing", { status: 404 });
 				},
 			});
-			expect(result).toEqual({ name: "frontend-design", rel: "frontend-design/SKILL.md" });
-			const body = await readFile(join(dest, "frontend-design", "SKILL.md"), "utf8");
+			expect(result).toEqual({
+				name: "frontend-design",
+				rel: "acme-pack-frontend-design/SKILL.md",
+			});
+			const body = await readFile(join(dest, "acme-pack-frontend-design", "SKILL.md"), "utf8");
 			expect(body).toContain("# Anthropic");
 			expect(existsSync(join(dest, "xlsx"))).toBe(false);
-			expect(existsSync(join(dest, "frontend-design", "xlsx"))).toBe(false);
+			expect(existsSync(join(dest, "frontend-design"))).toBe(false);
+		} finally {
+			await rm(dest, { recursive: true, force: true });
+		}
+	});
+
+	test("keeps two skills.sh rows with the same YAML name in separate folders", async () => {
+		const dest = await mkdtemp(join(tmpdir(), "harness-user-skills-"));
+		try {
+			const fetchFn = async (url: string) => {
+				if (url.includes("/repos/acme/pack/") && url.includes("/git/trees/")) {
+					return Response.json({ tree: [{ path: "frontend-design/SKILL.md", type: "blob" }] });
+				}
+				if (url.includes("/repos/other/ui/") && url.includes("/git/trees/")) {
+					return Response.json({ tree: [{ path: "frontend-design/SKILL.md", type: "blob" }] });
+				}
+				if (url.includes("/acme/pack/") && url.endsWith("frontend-design/SKILL.md")) {
+					return new Response("---\nname: frontend-design\n---\n\n# Acme\n");
+				}
+				if (url.includes("/other/ui/") && url.endsWith("frontend-design/SKILL.md")) {
+					return new Response("---\nname: frontend-design\n---\n\n# Other\n");
+				}
+				return new Response("missing", { status: 404 });
+			};
+			await installSkillFromSource({
+				source: "acme/pack/frontend-design",
+				destRoot: dest,
+				fetchFn,
+			});
+			await installSkillFromSource({ source: "other/ui/frontend-design", destRoot: dest, fetchFn });
+			expect(existsSync(join(dest, "acme-pack-frontend-design", "SKILL.md"))).toBe(true);
+			expect(existsSync(join(dest, "other-ui-frontend-design", "SKILL.md"))).toBe(true);
+			const merged = loadMergedSkills("/tmp/does-not-exist-host", dest);
+			expect(merged.filter((skill) => skill.name === "frontend-design")).toHaveLength(2);
+			const removed = removeSkillFromRoots("acme/pack/frontend-design", [dest]);
+			expect(removed.removed).toBe(true);
+			expect(existsSync(join(dest, "acme-pack-frontend-design"))).toBe(false);
+			expect(existsSync(join(dest, "other-ui-frontend-design"))).toBe(true);
+		} finally {
+			await rm(dest, { recursive: true, force: true });
+		}
+	});
+
+	test("installs a single-skill repo listed under a different catalog name", async () => {
+		const dest = await mkdtemp(join(tmpdir(), "harness-user-skills-"));
+		try {
+			const result = await installSkillFromSource({
+				source: "pbakaus/impeccable/frontend-design",
+				destRoot: dest,
+				fetchFn: async (url) => {
+					if (url.includes("/git/trees/")) {
+						return Response.json({
+							tree: [
+								{ path: ".claude/skills/impeccable/SKILL.md", type: "blob" },
+								{ path: ".cursor/skills/impeccable/SKILL.md", type: "blob" },
+								{ path: ".cursor/skills/impeccable/scripts/run.sh", type: "blob" },
+								{ path: "plugin/skills/impeccable/SKILL.md", type: "blob" },
+								{
+									path: "tests/oracle/workspaces/ctx-pin/.claude/skills/audit/SKILL.md",
+									type: "blob",
+								},
+								{
+									path: "tests/oracle/workspaces/ctx-pin/.claude/skills/impeccable/SKILL.md",
+									type: "blob",
+								},
+							],
+						});
+					}
+					if (url.endsWith("impeccable/SKILL.md")) {
+						return new Response("---\nname: impeccable\ndescription: ui\n---\n\n# Impeccable\n");
+					}
+					return new Response("missing", { status: 404 });
+				},
+			});
+			expect(result).toEqual({
+				name: "impeccable",
+				rel: "pbakaus-impeccable-frontend-design/SKILL.md",
+			});
+			expect(existsSync(join(dest, "pbakaus-impeccable-frontend-design", "SKILL.md"))).toBe(true);
+			expect(existsSync(join(dest, "audit"))).toBe(false);
+		} finally {
+			await rm(dest, { recursive: true, force: true });
+		}
+	});
+
+	test("matches a YAML catalog name after more than 12 other folders", async () => {
+		const dest = await mkdtemp(join(tmpdir(), "harness-user-skills-"));
+		try {
+			const fillers = Array.from({ length: 12 }, (_, i) => `skills/alpha-${i}/SKILL.md`);
+			const result = await installSkillFromSource({
+				source: "leonxlnx/taste-skill@design-taste-frontend-v1",
+				destRoot: dest,
+				fetchFn: async (url) => {
+					if (url.includes("/git/trees/")) {
+						return Response.json({
+							tree: [
+								...fillers.map((path) => ({ path, type: "blob" })),
+								{ path: "skills/taste-skill-v1/SKILL.md", type: "blob" },
+							],
+						});
+					}
+					if (url.endsWith("skills/taste-skill-v1/SKILL.md")) {
+						return new Response("---\nname: design-taste-frontend-v1\n---\n\n# Taste v1\n");
+					}
+					if (url.endsWith("SKILL.md")) {
+						return new Response("---\nname: filler\n---\n\n# Filler\n");
+					}
+					return new Response("missing", { status: 404 });
+				},
+			});
+			expect(result).toEqual({
+				name: "design-taste-frontend-v1",
+				rel: "leonxlnx-taste-skill-design-taste-frontend-v1/SKILL.md",
+			});
+			const body = await readFile(
+				join(dest, "leonxlnx-taste-skill-design-taste-frontend-v1", "SKILL.md"),
+				"utf8",
+			);
+			expect(body).toContain("# Taste v1");
+		} finally {
+			await rm(dest, { recursive: true, force: true });
+		}
+	});
+
+	test("installs a skill that has more than 40 reference files", async () => {
+		const dest = await mkdtemp(join(tmpdir(), "harness-user-skills-"));
+		try {
+			const tree = [
+				{ path: ".github/skills/impeccable/SKILL.md", type: "blob" },
+				...Array.from({ length: 40 }, (_, i) => ({
+					path: `.github/skills/impeccable/reference/n${i}.md`,
+					type: "blob",
+				})),
+			];
+			const result = await installSkillFromSource({
+				source: "pbakaus/impeccable/frontend-design",
+				destRoot: dest,
+				fetchFn: async (url) => {
+					if (url.includes("/git/trees/")) return Response.json({ tree });
+					if (url.endsWith("SKILL.md")) {
+						return new Response("---\nname: impeccable\n---\n\n# Impeccable\n");
+					}
+					if (url.endsWith(".md")) return new Response("# ref\n");
+					return new Response("missing", { status: 404 });
+				},
+			});
+			expect(result).toMatchObject({ name: "impeccable" });
+			expect(existsSync(join(dest, "pbakaus-impeccable-frontend-design", "SKILL.md"))).toBe(true);
+			expect(
+				existsSync(join(dest, "pbakaus-impeccable-frontend-design", "reference", "n0.md")),
+			).toBe(true);
+		} finally {
+			await rm(dest, { recursive: true, force: true });
+		}
+	});
+
+	test("matches a catalog name to YAML when the folder differs", async () => {
+		const dest = await mkdtemp(join(tmpdir(), "harness-user-skills-"));
+		try {
+			const result = await installSkillFromSource({
+				source: "acme/pack@frontend-design",
+				destRoot: dest,
+				fetchFn: async (url) => {
+					if (url.includes("/git/trees/")) {
+						return Response.json({
+							tree: [
+								{ path: "skills/ui/SKILL.md", type: "blob" },
+								{ path: "skills/xlsx/SKILL.md", type: "blob" },
+							],
+						});
+					}
+					if (url.endsWith("skills/ui/SKILL.md")) {
+						return new Response("---\nname: frontend-design\n---\n\n# UI\n");
+					}
+					if (url.endsWith("skills/xlsx/SKILL.md")) {
+						return new Response("---\nname: xlsx\n---\n\n# Sheets\n");
+					}
+					return new Response("missing", { status: 404 });
+				},
+			});
+			expect(result).toEqual({
+				name: "frontend-design",
+				rel: "acme-pack-frontend-design/SKILL.md",
+			});
+			const body = await readFile(join(dest, "acme-pack-frontend-design", "SKILL.md"), "utf8");
+			expect(body).toContain("# UI");
+		} finally {
+			await rm(dest, { recursive: true, force: true });
+		}
+	});
+
+	test("lists unique skill folders when the catalog name is missing", async () => {
+		const dest = await mkdtemp(join(tmpdir(), "harness-user-skills-"));
+		try {
+			const result = await installSkillFromSource({
+				source: "acme/pack@frontend-design",
+				destRoot: dest,
+				fetchFn: async (url) => {
+					if (url.includes("/git/trees/")) {
+						return Response.json({
+							tree: [
+								{ path: ".cursor/skills/impeccable/SKILL.md", type: "blob" },
+								{ path: ".claude/skills/impeccable/SKILL.md", type: "blob" },
+								{ path: "skills/audit/SKILL.md", type: "blob" },
+							],
+						});
+					}
+					if (url.endsWith("impeccable/SKILL.md")) {
+						return new Response("---\nname: impeccable\n---\n\n# Impeccable\n");
+					}
+					if (url.endsWith("audit/SKILL.md")) {
+						return new Response("---\nname: audit\n---\n\n# Audit\n");
+					}
+					return new Response("missing", { status: 404 });
+				},
+			});
+			expect(result).toMatchObject({
+				error: 'No skill "frontend-design" in acme/pack.',
+				choices: ["audit", "impeccable"],
+			});
 		} finally {
 			await rm(dest, { recursive: true, force: true });
 		}

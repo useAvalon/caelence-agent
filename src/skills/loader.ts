@@ -27,38 +27,56 @@ export function stripFrontmatter(md: string): { attrs: Record<string, string>; b
 	return { attrs: parseFrontmatter(raw), body };
 }
 
+function splitFrontmatterLine(line: string): { key: string; value: string } | undefined {
+	if (/^\s/.test(line)) return undefined;
+	const colon = line.indexOf(":");
+	if (colon <= 0) return undefined;
+	const key = line.slice(0, colon);
+	if (!/^[A-Za-z0-9_-]+$/.test(key)) return undefined;
+	return { key, value: line.slice(colon + 1).trim() };
+}
+
+function readFoldedFrontmatterValue(
+	lines: string[],
+	start: number,
+): { value: string; next: number } {
+	const folded: string[] = [];
+	let i = start;
+	while (i < lines.length) {
+		const next = lines[i] ?? "";
+		if (splitFrontmatterLine(next)) break;
+		folded.push(next.replace(/^\s{2,}/, ""));
+		i += 1;
+	}
+	return { value: folded.join(" ").replaceAll(/\s+/g, " ").trim(), next: i };
+}
+
 function parseFrontmatter(raw: string): Record<string, string> {
 	const attrs: Record<string, string> = {};
 	const lines = raw.split("\n");
 	let i = 0;
 	while (i < lines.length) {
 		const line = lines[i] ?? "";
-		const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+		const match = splitFrontmatterLine(line);
 		if (!match) {
 			i += 1;
 			continue;
 		}
-		const key = match[1] ?? "";
-		let value = (match[2] ?? "").trim();
-		if (value === ">" || value === ">|" || value === ">-" || value === "|" || value === "|-") {
-			const folded: string[] = [];
-			i += 1;
-			while (i < lines.length) {
-				const next = lines[i] ?? "";
-				if (/^[A-Za-z0-9_-]+:\s*/.test(next) && !/^\s/.test(next)) break;
-				folded.push(next.replace(/^\s{2,}/, ""));
-				i += 1;
-			}
-			attrs[key] = folded.join(" ").replace(/\s+/g, " ").trim();
+		const foldedMarks = new Set([">", ">|", ">-", "|", "|-"]);
+		if (foldedMarks.has(match.value)) {
+			const folded = readFoldedFrontmatterValue(lines, i + 1);
+			attrs[match.key] = folded.value;
+			i = folded.next;
 			continue;
 		}
+		let value = match.value;
 		if (
 			(value.startsWith('"') && value.endsWith('"')) ||
 			(value.startsWith("'") && value.endsWith("'"))
 		) {
 			value = value.slice(1, -1);
 		}
-		attrs[key] = value;
+		attrs[match.key] = value;
 		i += 1;
 	}
 	return attrs;
@@ -75,7 +93,7 @@ export function parseSkillMarkdown(md: string, absPath: string, root: string): S
 		description,
 		body,
 		path: absPath,
-		relPath: relative(root, absPath).split("\\").join("/"),
+		relPath: relative(root, absPath).replaceAll("\\", "/"),
 		source: "host",
 	};
 }
@@ -97,12 +115,18 @@ export function isBundledCatalogDir(abs: string): boolean {
 	return resolve(abs) === resolve(bundled);
 }
 
+function skillMergeKey(skill: Skill): string {
+	const ref = skill.catalogRef?.trim();
+	if (ref) return `ref:${ref.replaceAll("@", "/").toLowerCase()}`;
+	return `name:${skill.name.toLowerCase()}`;
+}
+
 /** Later writers win. Used to overlay host skills on a catalog or user store. */
 export function mergeSkills(first: Skill[], host: Skill[]): Skill[] {
-	const byName = new Map<string, Skill>();
-	for (const skill of first) byName.set(skill.name.toLowerCase(), skill);
-	for (const skill of host) byName.set(skill.name.toLowerCase(), { ...skill, source: "host" });
-	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+	const byKey = new Map<string, Skill>();
+	for (const skill of first) byKey.set(skillMergeKey(skill), skill);
+	for (const skill of host) byKey.set(skillMergeKey(skill), { ...skill, source: "host" });
+	return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Skills shipped with the package. Not loaded until `/skill add`. */
@@ -131,18 +155,18 @@ export function resolveHostSkillDirs(cwd: string, configured: string): string[] 
 
 export function loadMergedSkills(hostSkillsDir: string | string[], userDir?: string): Skill[] {
 	const dirs = Array.isArray(hostSkillsDir) ? hostSkillsDir : [hostSkillsDir];
-	const byName = new Map<string, Skill>();
+	const byKey = new Map<string, Skill>();
 	if (userDir) {
 		for (const skill of loadSkills(userDir)) {
-			byName.set(skill.name.toLowerCase(), { ...skill, source: "user" });
+			byKey.set(skillMergeKey(skill), { ...skill, source: "user" });
 		}
 	}
 	for (const dir of dirs) {
 		for (const skill of loadSkills(dir)) {
-			byName.set(skill.name.toLowerCase(), { ...skill, source: "host" });
+			byKey.set(skillMergeKey(skill), { ...skill, source: "host" });
 		}
 	}
-	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+	return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function loadSkills(skillsDir: string): Skill[] {
@@ -172,18 +196,25 @@ export function loadSkills(skillsDir: string): Skill[] {
 
 export function skillCatalogPrompt(skills: Skill[]): string {
 	if (skills.length === 0) return "";
-	const lines = skills.map((s) => `- ${s.name} (${s.source})`);
+	const lines = skills.map((s) => {
+		const origin = s.catalogRef || s.source;
+		return `- ${s.name} (${origin})`;
+	});
 	return [
 		"## Skills",
-		"Skills are instruction files, not tools. When a task matches a name, read it with read_skill. Do not list or quote these unless the user asks.",
+		"Skills are instruction files, not tools. When a task matches a name, read it with read_skill. Do not list or quote these unless the user asks. If two skills share a name, pass the catalog id in parentheses.",
 		...lines,
 	].join("\n");
 }
 
 export function skillBodiesForNames(skills: Skill[], names: string[]): string {
-	const wanted = new Set(names.map((n) => n.trim().toLowerCase()));
+	const wanted = new Set(names.map((n) => n.trim().toLowerCase().replaceAll("@", "/")));
 	return skills
-		.filter((s) => wanted.has(s.name.toLowerCase()))
+		.filter((s) => {
+			const name = s.name.toLowerCase();
+			const ref = s.catalogRef?.replaceAll("@", "/").toLowerCase();
+			return wanted.has(name) || (ref ? wanted.has(ref) : false);
+		})
 		.map((s) => `# Skill: ${s.name}\n\n${s.body}`)
 		.join("\n\n");
 }

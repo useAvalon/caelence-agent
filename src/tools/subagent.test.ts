@@ -33,6 +33,35 @@ describe("read_skill", () => {
 		const missing = await tool.handler({ name: "not-a-skill" });
 		expect(missing.isError).toBe(true);
 	});
+
+	test("asks for a catalog id when two loaded skills share a YAML name", async () => {
+		const tool = createReadSkillTool([
+			{
+				name: "frontend-design",
+				description: "a",
+				body: "# Acme",
+				path: "/tmp/acme/SKILL.md",
+				relPath: "acme/SKILL.md",
+				source: "user",
+				catalogRef: "acme/pack/frontend-design",
+			},
+			{
+				name: "frontend-design",
+				description: "b",
+				body: "# Other",
+				path: "/tmp/other/SKILL.md",
+				relPath: "other/SKILL.md",
+				source: "user",
+				catalogRef: "other/ui/frontend-design",
+			},
+		]);
+		const ambiguous = await tool.handler({ name: "frontend-design" });
+		expect(ambiguous.isError).toBe(true);
+		expect(ambiguous.content[0]?.text).toContain("acme/pack/frontend-design");
+		const picked = await tool.handler({ name: "other/ui/frontend-design" });
+		expect(picked.isError).toBeFalsy();
+		expect(picked.content[0]?.text).toContain("# Other");
+	});
 });
 
 describe("task subagent", () => {
