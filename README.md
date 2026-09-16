@@ -4,7 +4,7 @@
 
 # Caelence agent
 
-A coding agent that runs on this machine, as a desktop app or as a terminal UI.
+A harness with a desktop app and a terminal UI for OpenRouter models, skills, and integrations.
 
 The package is [`@useavalon/caelence-agent`](https://www.npmjs.com/package/@useavalon/caelence-agent) on npm and needs [Bun](https://bun.sh) 1.2 or later.
 
