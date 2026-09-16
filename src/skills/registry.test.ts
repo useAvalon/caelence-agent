@@ -12,6 +12,7 @@ import {
 	parseBundledSkillRef,
 	parseSkillSource,
 	removeSkillFromRoots,
+	searchSkillCatalog,
 	searchSkills,
 	searchSkillsSh,
 } from "./registry.ts";
@@ -113,6 +114,47 @@ describe("installSkillFromSource", () => {
 			expect(result).toEqual({ name: "hello", rel: "hello/SKILL.md" });
 			const body = await readFile(join(dest, "hello", "SKILL.md"), "utf8");
 			expect(body).toContain("# Hello");
+			expect(await readFile(join(dest, "hello", ".catalog-ref"), "utf8")).toBe("acme/pack@hello\n");
+		} finally {
+			await rm(dest, { recursive: true, force: true });
+		}
+	});
+
+	test("installs one named skill from a repo that contains several", async () => {
+		const dest = await mkdtemp(join(tmpdir(), "harness-user-skills-"));
+		try {
+			const result = await installSkillFromSource({
+				source: "acme/pack@frontend-design",
+				destRoot: dest,
+				fetchFn: async (url) => {
+					if (url.includes("/git/trees/")) {
+						return Response.json({
+							tree: [
+								{ path: "skills/xlsx/SKILL.md", type: "blob" },
+								{ path: "skills/frontend-design/SKILL.md", type: "blob" },
+								{ path: "archive/frontend-design/SKILL.md", type: "blob" },
+							],
+						});
+					}
+					if (url.endsWith("skills/frontend-design/SKILL.md")) {
+						return new Response(
+							"---\nname: frontend-design\ndescription: ui\n---\n\n# Anthropic\n",
+						);
+					}
+					if (url.endsWith("archive/frontend-design/SKILL.md")) {
+						return new Response("---\nname: frontend-design\ndescription: old\n---\n\n# Old\n");
+					}
+					if (url.endsWith("skills/xlsx/SKILL.md")) {
+						return new Response("---\nname: xlsx\ndescription: sheets\n---\n\n# Xlsx\n");
+					}
+					return new Response("missing", { status: 404 });
+				},
+			});
+			expect(result).toEqual({ name: "frontend-design", rel: "frontend-design/SKILL.md" });
+			const body = await readFile(join(dest, "frontend-design", "SKILL.md"), "utf8");
+			expect(body).toContain("# Anthropic");
+			expect(existsSync(join(dest, "xlsx"))).toBe(false);
+			expect(existsSync(join(dest, "frontend-design", "xlsx"))).toBe(false);
 		} finally {
 			await rm(dest, { recursive: true, force: true });
 		}
@@ -129,13 +171,33 @@ describe("bundled catalog", () => {
 	test("find lists bundled copy skills without a network call", async () => {
 		const hits = bundledRegistryHits("copy");
 		expect(hits.map((hit) => hit.name)).toContain("copywriting");
-		expect(hits.map((hit) => hit.name)).toContain("copy-editor");
+		expect(hits.map((hit) => hit.name)).not.toContain("copy-editor");
 		const listed = await searchSkills(
 			"copy",
 			async () => new Response(JSON.stringify({ skills: [] })),
 		);
 		expect(listed).toContain("bundled@copywriting");
-		expect(listed).toContain("bundled@copy-editor");
+		expect(listed).not.toContain("bundled@copy-editor");
+		const catalog = await searchSkillCatalog(
+			"copy",
+			async () =>
+				new Response(
+					JSON.stringify({
+						skills: [
+							{
+								id: "acme/pack/copywriting",
+								name: "copywriting",
+								source: "acme/pack",
+								installs: 3,
+							},
+						],
+					}),
+				),
+		);
+		expect(catalog.some((hit) => hit.source === "bundled" && hit.name === "copywriting")).toBe(
+			true,
+		);
+		expect(catalog.some((hit) => hit.source === "acme/pack")).toBe(true);
 	});
 
 	test("installs the writing pack and removes it", async () => {
@@ -153,7 +215,6 @@ describe("bundled catalog", () => {
 				expect.arrayContaining(["copywriting", "copy-rmbc", "copy-harry-dry", "copy-editor"]),
 			);
 			expect(merged.every((skill) => skill.source === "user")).toBe(true);
-			expect(merged.map((skill) => skill.name)).not.toContain("impeccable");
 
 			const one = installBundledSkills("impeccable", dest);
 			expect("error" in one).toBe(false);

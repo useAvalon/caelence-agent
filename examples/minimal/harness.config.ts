@@ -2,7 +2,7 @@ import type { HarnessConfig } from "../../src/config.ts";
 
 export default {
 	name: "minimal",
-	model: "~x-ai/grok-latest",
+	model: "openrouter/auto",
 	instructionsFile: "AGENTS.md",
 	skillsDir: "skills",
 	evalsDir: "evals",

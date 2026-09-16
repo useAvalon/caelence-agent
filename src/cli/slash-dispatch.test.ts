@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Session } from "../core/session.ts";
 import type { HarnessRuntime } from "../runtime.ts";
+import { clearPopularSkillsCache, writePopularSkillsCache } from "../skills/catalog.ts";
 import { HARNESS_MODELS } from "./models.ts";
 import { applyPickerChoice, dispatchSlash, runSlashLine } from "./slash-dispatch.ts";
 
@@ -54,6 +55,9 @@ function fakeHarness(overrides: Partial<HarnessRuntime> = {}): HarnessRuntime {
 		findSkills: async () => "frontend-design",
 		addSkill: async () => ({ rel: "frontend-design/SKILL.md" }),
 		removeSkill: () => ({ ok: true }),
+		disabledSkills: () => [],
+		enableSkill: () => ({ ok: true }),
+		reloadIntegrations: async () => {},
 		chat: async () => "",
 		observability: {} as HarnessRuntime["observability"],
 		close() {},
@@ -153,7 +157,11 @@ describe("dispatchSlash", () => {
 		const prevHome = process.env.HARNESS_HOME;
 		process.env.HARNESS_HOME = home;
 		try {
-			const result = applyPickerChoice(fakeHarness(), "image", "google/gemini-2.5-flash-image");
+			const result = await applyPickerChoice(
+				fakeHarness(),
+				"image",
+				"google/gemini-2.5-flash-image",
+			);
 			expect(result).toEqual({ kind: "applied" });
 		} finally {
 			if (prevHome === undefined) delete process.env.HARNESS_HOME;
@@ -162,18 +170,77 @@ describe("dispatchSlash", () => {
 		}
 	});
 
-	test("mode picker stores the mode without a transcript line", () => {
+	test("mode picker stores the mode without a transcript line", async () => {
 		const harness = fakeHarness({ mode: "ask" });
-		const result = applyPickerChoice(harness, "mode", "agent");
+		const result = await applyPickerChoice(harness, "mode", "agent");
 		expect(result).toEqual({ kind: "applied" });
 		expect(harness.mode).toBe("agent");
 	});
 
-	test("runSlashLine lists the skill catalog on bare find", async () => {
-		expect(await runSlashLine(fakeHarness(), "/skill find")).toEqual({
-			kind: "text",
-			text: "frontend-design",
+	test("skill picker adds a catalog skill and disables project skills", async () => {
+		const harness = fakeHarness();
+		const added = await applyPickerChoice(harness, "skill", "obra/superpowers@brainstorming");
+		expect(added).toEqual({ kind: "text", text: "Loaded frontend-design/SKILL.md" });
+		const already = await applyPickerChoice(harness, "skill", "bundled@copywriting");
+		expect(already).toEqual({ kind: "text", text: "Disabled copywriting" });
+		const userHarness = fakeHarness({
+			skills: [
+				{
+					name: "frontend-design",
+					source: "user",
+					catalogRef: "anthropics/skills@frontend-design",
+				},
+			] as HarnessRuntime["skills"],
 		});
+		const removed = await applyPickerChoice(
+			userHarness,
+			"skill",
+			"anthropics/skills@frontend-design",
+		);
+		expect(removed).toEqual({ kind: "text", text: "Removed frontend-design" });
+		const disabledHarness = fakeHarness({
+			disabledSkills: () => ["copywriting"],
+		});
+		const enabled = await applyPickerChoice(disabledHarness, "skill", "bundled@copywriting");
+		expect(enabled).toEqual({ kind: "text", text: "Enabled copywriting" });
+	});
+
+	test("runSlashLine opens a skill picker for empty find", async () => {
+		const home = await mkdtemp(join(tmpdir(), "harness-skill-find-"));
+		const prevHome = process.env.HARNESS_HOME;
+		process.env.HARNESS_HOME = home;
+		writePopularSkillsCache(
+			[{ id: "acme/pack/hello", name: "hello", source: "acme/pack", installs: 9 }],
+			process.env,
+		);
+		try {
+			const result = await runSlashLine(fakeHarness(), "/skill find");
+			expect(result.kind).toBe("picker");
+			if (result.kind === "picker") {
+				expect(result.picker).toBe("skill");
+				expect(result.title).toBe("Skills");
+				expect(result.items.some((item) => item.id === "bundled@copywriting")).toBe(true);
+				expect(result.items.some((item) => item.id === "acme/pack@hello")).toBe(true);
+			}
+		} finally {
+			clearPopularSkillsCache();
+			if (prevHome === undefined) delete process.env.HARNESS_HOME;
+			else process.env.HARNESS_HOME = prevHome;
+			await rm(home, { recursive: true, force: true });
+		}
+		const prevFetch = globalThis.fetch;
+		globalThis.fetch = async () => new Response(JSON.stringify({ skills: [] }));
+		try {
+			const result = await runSlashLine(fakeHarness(), "/skill find copywriting");
+			expect(result.kind).toBe("picker");
+			if (result.kind === "picker") {
+				expect(result.picker).toBe("skill");
+				expect(result.title).toBe("Skills · copywriting");
+				expect(result.items.some((item) => item.id === "bundled@copywriting")).toBe(true);
+			}
+		} finally {
+			globalThis.fetch = prevFetch;
+		}
 		expect(await runSlashLine(fakeHarness(), "/ima")).toEqual({
 			kind: "incomplete",
 			draft: "/image ",
@@ -187,6 +254,47 @@ describe("dispatchSlash", () => {
 		if (result.kind === "text") {
 			expect(result.text).toContain("No key");
 			expect(result.text).toContain("/settings key");
+		}
+	});
+
+	test("integrations picker lists MCP servers", async () => {
+		const result = await dispatchSlash(fakeHarness(), "/integrations");
+		expect(result.kind).toBe("picker");
+		if (result.kind === "picker") {
+			expect(result.picker).toBe("integration");
+			expect(result.items.some((item) => item.id === "linear" && item.label === "Linear")).toBe(
+				true,
+			);
+			expect(result.items.find((item) => item.id === "linear")?.hint).toBe("connect");
+		}
+		const missing = await dispatchSlash(fakeHarness(), "/integrations not-a-server");
+		expect(missing).toEqual({ kind: "text", text: 'No integration "not-a-server".' });
+	});
+
+	test("integration picker disconnects a stored connection", async () => {
+		const home = await mkdtemp(join(tmpdir(), "harness-int-"));
+		const prevHome = process.env.HARNESS_HOME;
+		process.env.HARNESS_HOME = home;
+		try {
+			const { upsertConnection } = await import("../integrations/store.ts");
+			upsertConnection({
+				id: "linear",
+				label: "Linear",
+				mcpUrl: "https://mcp.linear.app/mcp",
+				accessToken: "tok",
+				connectedAt: "2026-01-01T00:00:00.000Z",
+			});
+			const listed = await dispatchSlash(fakeHarness(), "/integrations");
+			expect(listed.kind).toBe("picker");
+			if (listed.kind === "picker") {
+				expect(listed.items.find((item) => item.id === "linear")?.hint).toBe("on · disconnect");
+			}
+			const removed = await applyPickerChoice(fakeHarness(), "integration", "linear");
+			expect(removed).toEqual({ kind: "text", text: "Disconnected Linear" });
+		} finally {
+			if (prevHome === undefined) delete process.env.HARNESS_HOME;
+			else process.env.HARNESS_HOME = prevHome;
+			await rm(home, { recursive: true, force: true });
 		}
 	});
 

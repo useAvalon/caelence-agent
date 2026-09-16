@@ -1,0 +1,14 @@
+Impeccable
+Copyright 2025 Paul Bakaus
+
+This folder is a derivative of https://github.com/pbakaus/impeccable
+licensed under the Apache License, Version 2.0. See LICENSE.
+
+Trademark: the name Impeccable is used only to describe the origin of
+the work. This is not an official Impeccable distribution.
+
+Modifications for Caelence agent:
+- Rewritten as SKILL.md for this agent (no npm installer, no /impeccable binary)
+- Host design.md is visual authority
+- Copy pipeline (copywriting) is out of scope here
+- Visual-slop list kept as references/visual-slop.md

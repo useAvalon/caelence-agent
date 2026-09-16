@@ -33,4 +33,9 @@ describe("parseCliArgs", () => {
 		expect(parsed.mode).toBe("ask");
 		expect(parsed.message).toBe("hello");
 	});
+
+	test("marks --cwd as explicit", () => {
+		expect(parseCliArgs(["eval"]).cwdExplicit).toBe(false);
+		expect(parseCliArgs(["--cwd", "/tmp/proj", "eval"]).cwdExplicit).toBe(true);
+	});
 });

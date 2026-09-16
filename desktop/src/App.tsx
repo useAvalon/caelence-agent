@@ -1,20 +1,35 @@
-import { ArrowUpRight } from "@phosphor-icons/react/dist/csr/ArrowUpRight";
-import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
-import { CaretUp } from "@phosphor-icons/react/dist/csr/CaretUp";
-import { Check } from "@phosphor-icons/react/dist/csr/Check";
-import { FolderSimple } from "@phosphor-icons/react/dist/csr/FolderSimple";
-import { Gear } from "@phosphor-icons/react/dist/csr/Gear";
-import { Microphone } from "@phosphor-icons/react/dist/csr/Microphone";
-import { PaperPlaneTilt } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
-import { PencilSimple } from "@phosphor-icons/react/dist/csr/PencilSimple";
-import { Plugs } from "@phosphor-icons/react/dist/csr/Plugs";
-import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
-import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
-import { Square } from "@phosphor-icons/react/dist/csr/Square";
-import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
-import { X } from "@phosphor-icons/react/dist/csr/X";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { draftAfterPicker, resolveSlashSubmit } from "../../src/cli/slash";
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUpRight";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+import { FolderSimpleIcon } from "@phosphor-icons/react/dist/csr/FolderSimple";
+import { GearIcon } from "@phosphor-icons/react/dist/csr/Gear";
+import { MicrophoneIcon } from "@phosphor-icons/react/dist/csr/Microphone";
+import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
+import { PlugsIcon } from "@phosphor-icons/react/dist/csr/Plugs";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/csr/PuzzlePiece";
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
+import { SquareIcon } from "@phosphor-icons/react/dist/csr/Square";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import {
+	type Dispatch,
+	type SetStateAction,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
+import {
+	draftAfterPicker,
+	PICKS_WHEN_EMPTY,
+	parseSlashLine,
+	resolveSlashSubmit,
+} from "../../src/cli/slash";
+import { errorMessage } from "../../src/core/errors";
+import { AGENT_MODES } from "../../src/core/mode";
 import {
 	type AgentEvent,
 	abortTurn,
@@ -28,6 +43,7 @@ import {
 	embedPreview,
 	filesFromDroppedPaths,
 	getIntegrations,
+	getModels,
 	getSessions,
 	getSettings,
 	getSlash,
@@ -81,6 +97,7 @@ import {
 	updateQueued,
 } from "./queue";
 import { canvaViewUrl, splitRichText } from "./rich-text";
+import { SkillsPanel } from "./SkillsPanel";
 import { clampMenuPosition } from "./session-menu";
 import {
 	applyEvent,
@@ -101,7 +118,7 @@ import { eventCountSuffix } from "./tool-label";
 
 type ThemeChoice = "system" | "light" | "dark";
 type UiStatus = "boot" | "idle" | "running" | "approval" | "picker";
-type MainView = "chat" | "settings" | "integrations";
+type MainView = "chat" | "settings" | "integrations" | "skills";
 
 interface PickerState {
 	title: string;
@@ -132,18 +149,28 @@ function pickerSelectedId(kind: SlashPickerKind, current: DesktopState): string 
 	return undefined;
 }
 
+function mainViewTitle(view: MainView): string {
+	if (view === "settings") return "Settings";
+	if (view === "integrations") return "Integrations";
+	if (view === "skills") return "Skills";
+	return "Chat";
+}
+
 function titleCase(value: string): string {
 	return value ? `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}` : value;
 }
 
-function composerMediaMeta(current: DesktopState): string {
+interface MediaModelStatus {
+	kind: string;
+	label: string;
+}
+
+function composerMediaModels(current: DesktopState): MediaModelStatus[] {
 	return [
-		current.imageModelLabel ? `Image ${current.imageModelLabel}` : null,
-		current.videoModelLabel ? `Clip ${current.videoModelLabel}` : null,
-		current.transcribeModelLabel ? `Speech ${current.transcribeModelLabel}` : null,
-	]
-		.filter((part): part is string => Boolean(part))
-		.join(" · ");
+		current.imageModelLabel ? { kind: "Image", label: current.imageModelLabel } : null,
+		current.videoModelLabel ? { kind: "Clip", label: current.videoModelLabel } : null,
+		current.transcribeModelLabel ? { kind: "Speech", label: current.transcribeModelLabel } : null,
+	].filter((part): part is MediaModelStatus => Boolean(part));
 }
 
 function readTheme(): ThemeChoice {
@@ -153,8 +180,8 @@ function readTheme(): ThemeChoice {
 
 function applyTheme(choice: ThemeChoice): void {
 	const root = document.documentElement;
-	if (choice === "system") root.removeAttribute("data-theme");
-	else root.setAttribute("data-theme", choice);
+	if (choice === "system") delete root.dataset.theme;
+	else root.dataset.theme = choice;
 	localStorage.setItem("harness-theme", choice);
 }
 
@@ -174,6 +201,219 @@ function writeMediaMeta(open: boolean): void {
 	localStorage.setItem("harness-media-meta", open ? "on" : "off");
 }
 
+function slashMenuKey(
+	key: string,
+	slashOpen: boolean,
+	count: number,
+): "down" | "up" | "tab" | undefined {
+	if (!slashOpen || count === 0) return undefined;
+	if (key === "ArrowDown") return "down";
+	if (key === "ArrowUp") return "up";
+	if (key === "Tab") return "tab";
+	return undefined;
+}
+
+function composerEscapeAction(
+	editing: boolean,
+	status: UiStatus,
+): "cancel-edit" | "stop" | undefined {
+	if (editing) return "cancel-edit";
+	if (status === "running" || status === "approval") return "stop";
+	return undefined;
+}
+
+function applySlashComposerKey(
+	slashKey: "down" | "up" | "tab" | undefined,
+	slashItems: SlashCommand[],
+	slashIndex: number,
+	setSlashIndex: Dispatch<SetStateAction<number>>,
+	setDraft: Dispatch<SetStateAction<string>>,
+): boolean {
+	if (slashKey === "down") {
+		setSlashIndex((index) => (index + 1) % slashItems.length);
+		return true;
+	}
+	if (slashKey === "up") {
+		setSlashIndex((index) => (index - 1 + slashItems.length) % slashItems.length);
+		return true;
+	}
+	if (slashKey !== "tab") return false;
+	const selected = slashItems[slashIndex] ?? slashItems[0];
+	if (selected) setDraft(selected.arg ? `/${selected.name} ` : `/${selected.name}`);
+	return true;
+}
+
+function desktopCommandView(cmd: string): "skills" | "integrations" | undefined {
+	if (cmd === "skills" || cmd === "skill find") return "skills";
+	if (cmd === "integrations" || cmd === "integration") return "integrations";
+	return undefined;
+}
+
+const SILENT_CAPTIONS = "data:text/vtt,WEBVTT";
+
+function composePlaceholder(listening: boolean, status: UiStatus): string {
+	if (listening) return "Listening";
+	if (status === "running") return "Queue a follow-up";
+	return "Ask the project";
+}
+
+function pickerItemHint(applied: boolean, hint?: string): React.ReactNode {
+	if (applied) return <em>on</em>;
+	if (hint) return <em>{hint}</em>;
+	return null;
+}
+
+function richPartKey(part: ReturnType<typeof splitRichText>[number]): string {
+	if (part.type === "text") return `text:${part.text}`;
+	if (part.type === "link") return `link:${part.href}:${part.label}`;
+	if (part.type === "file") return `file:${part.path}:${part.label}`;
+	return `image:${part.src}:${part.alt}`;
+}
+
+function DeskSidePanel(
+	props: Readonly<{
+		view: MainView;
+		bridge: BridgeClient | null;
+		theme: ThemeChoice;
+		skillQuery: string;
+		onTheme: (theme: ThemeChoice) => void;
+		onSaved: (state: DesktopState) => void;
+		onNotice: (text: string) => void;
+		onSkillQuery: (value: string) => void;
+	}>,
+): React.ReactElement | null {
+	if (!props.bridge) return null;
+	if (props.view === "settings") {
+		return (
+			<SettingsPanel
+				bridge={props.bridge}
+				theme={props.theme}
+				onTheme={props.onTheme}
+				onSaved={props.onSaved}
+				onNotice={props.onNotice}
+			/>
+		);
+	}
+	if (props.view === "integrations") {
+		return <IntegrationsPanel bridge={props.bridge} onNotice={props.onNotice} />;
+	}
+	if (props.view === "skills") {
+		return (
+			<SkillsPanel
+				bridge={props.bridge}
+				query={props.skillQuery}
+				onQuery={props.onSkillQuery}
+				onNotice={props.onNotice}
+			/>
+		);
+	}
+	return null;
+}
+
+function ComposeMicControl(
+	props: Readonly<{
+		status: UiStatus;
+		listening: boolean;
+		onStop: () => void;
+		onStopDictation: () => void;
+		onStartDictation: () => void;
+	}>,
+): React.ReactElement {
+	if (props.status === "running" || props.status === "approval") {
+		return (
+			<button type="button" className="desk-compose-icon" aria-label="Stop" onClick={props.onStop}>
+				<SquareIcon size={16} weight="regular" />
+			</button>
+		);
+	}
+	if (props.listening) {
+		return (
+			<button
+				type="button"
+				className="desk-compose-icon is-on"
+				aria-label="Stop dictation"
+				aria-pressed
+				onClick={props.onStopDictation}
+			>
+				<MicrophoneIcon size={16} weight="regular" />
+			</button>
+		);
+	}
+	return (
+		<button
+			type="button"
+			className="desk-compose-icon"
+			aria-label="Dictate"
+			aria-pressed={false}
+			disabled={props.status !== "idle"}
+			onClick={props.onStartDictation}
+		>
+			<MicrophoneIcon size={16} weight="regular" />
+		</button>
+	);
+}
+
+function DeskBoot(props: Readonly<{ error?: string }>): React.ReactElement {
+	return (
+		<div className="desk desk--boot">
+			<header className="desk-bar">
+				<LogoMark size={20} />
+				<h1>Caelence</h1>
+				{props.error ? null : (
+					<span className="cel-chip cel-chip--run">
+						<span className="cel-chip__spin" aria-hidden="true" />
+						{"Starting"}
+					</span>
+				)}
+			</header>
+			<main className="desk-empty">
+				{props.error ? (
+					<>
+						<p>{props.error}</p>
+						<p>Open this UI from the Caelence agent window, not a browser tab.</p>
+					</>
+				) : (
+					<p>Starting the local runtime</p>
+				)}
+			</main>
+		</div>
+	);
+}
+
+function applyDesktopTurnEvent(
+	event: AgentEvent,
+	setState: Dispatch<SetStateAction<DesktopState | null>>,
+	setPending: Dispatch<SetStateAction<PendingApproval | null>>,
+	setStatus: Dispatch<SetStateAction<UiStatus>>,
+	setLines: Dispatch<SetStateAction<StreamLine[]>>,
+): boolean {
+	if (event.kind === "session_meta") {
+		setState((s) => (s ? { ...s, title: event.title } : s));
+	}
+	if (event.kind === "approval_request") {
+		setPending({
+			callId: event.callId,
+			toolName: event.toolName,
+			input: event.input,
+		});
+		setStatus("approval");
+	}
+	setLines((prev) => applyEvent(prev, event));
+	return event.kind === "completion" || event.kind === "error";
+}
+
+function failRunningTools(prev: StreamLine[]): StreamLine[] {
+	return prev.map((line) =>
+		line.type === "tool" && line.status === "running"
+			? {
+					...line,
+					status: "fail" as const,
+					error: "Turn stopped before this tool finished.",
+				}
+			: line,
+	);
+}
+
 export function App(): React.ReactElement {
 	const [bridge, setBridge] = useState<BridgeClient | null>(null);
 	const [bootError, setBootError] = useState<string | null>(null);
@@ -183,6 +423,7 @@ export function App(): React.ReactElement {
 	const [draft, setDraft] = useState("");
 	const [status, setStatus] = useState<UiStatus>("boot");
 	const [view, setView] = useState<MainView>("chat");
+	const [skillQuery, setSkillQuery] = useState("");
 	const [theme, setTheme] = useState<ThemeChoice>(readTheme);
 	const [sideOpen, setSideOpen] = useState(readSidebar);
 	const [mediaOpen, setMediaOpen] = useState(readMediaMeta);
@@ -216,6 +457,7 @@ export function App(): React.ReactElement {
 	const queueRef = useRef<QueuedMessage[]>([]);
 	const sendingRef = useRef(false);
 	const skipDrainRef = useRef(false);
+	const pickerRequestRef = useRef(0);
 	attachmentsRef.current = attachments;
 
 	const slashOpen = view === "chat" && draft.startsWith("/") && !listening && status !== "picker";
@@ -239,6 +481,15 @@ export function App(): React.ReactElement {
 
 	useEffect(() => {
 		let cancelled = false;
+		const timer = window.setTimeout(() => {
+			if (!cancelled) {
+				setBootError(
+					(current) =>
+						current ??
+						"Caelence agent is taking too long to start. Close the window and run it again.",
+				);
+			}
+		}, 12_000);
 		void (async () => {
 			try {
 				const client = await resolveBridge();
@@ -260,10 +511,13 @@ export function App(): React.ReactElement {
 				setBootError(
 					err instanceof Error ? err.message : "Caelence agent could not reach the local runtime.",
 				);
+			} finally {
+				window.clearTimeout(timer);
 			}
 		})();
 		return () => {
 			cancelled = true;
+			window.clearTimeout(timer);
 		};
 	}, []);
 
@@ -307,7 +561,7 @@ export function App(): React.ReactElement {
 
 	const noticeError = useCallback(
 		(err: unknown) => {
-			showNotice(err instanceof Error ? err.message : String(err));
+			showNotice(errorMessage(err));
 		},
 		[showNotice],
 	);
@@ -468,7 +722,6 @@ export function App(): React.ReactElement {
 			if (!bridge) return;
 			sendingRef.current = true;
 			skipDrainRef.current = false;
-			setView("chat");
 			try {
 				let current = message;
 				let edit = editUserTurn;
@@ -481,7 +734,18 @@ export function App(): React.ReactElement {
 							current === "--help" ||
 							current === "-h");
 					if (slash) {
-						setStatus("running");
+						const { cmd, arg } = parseSlashLine(current);
+						const viewForCmd = desktopCommandView(cmd);
+						if (viewForCmd) {
+							if (viewForCmd === "skills") setSkillQuery(cmd === "skill find" ? arg : "");
+							setView(viewForCmd);
+							setDraft("");
+							break;
+						}
+						if (arg || !PICKS_WHEN_EMPTY.has(cmd)) {
+							setStatus("running");
+						}
+						setView("chat");
 						try {
 							const result = await startTurn(bridge, current);
 							if (result?.outcome) await applyOutcome(result.outcome, result.state);
@@ -497,6 +761,7 @@ export function App(): React.ReactElement {
 							if (!isAbortError(err)) noticeError(err);
 						}
 					} else {
+						setView("chat");
 						const editIndex = edit;
 						const previews = toAttachmentPreviews(pendingFiles);
 						if (editIndex !== undefined) {
@@ -524,36 +789,16 @@ export function App(): React.ReactElement {
 								bridge,
 								current,
 								(event: AgentEvent) => {
-									if (event.kind === "session_meta") {
-										setState((s) => (s ? { ...s, title: event.title } : s));
+									if (applyDesktopTurnEvent(event, setState, setPending, setStatus, setLines)) {
+										finished = true;
 									}
-									if (event.kind === "approval_request") {
-										setPending({
-											callId: event.callId,
-											toolName: event.toolName,
-											input: event.input,
-										});
-										setStatus("approval");
-									}
-									if (event.kind === "completion" || event.kind === "error") finished = true;
-									setLines((prev) => applyEvent(prev, event));
 								},
 								undefined,
 								edit,
 								payload,
 							);
 							if (!finished) {
-								setLines((prev) =>
-									prev.map((line) =>
-										line.type === "tool" && line.status === "running"
-											? {
-													...line,
-													status: "fail" as const,
-													error: "Turn stopped before this tool finished.",
-												}
-											: line,
-									),
-								);
+								setLines(failRunningTools);
 								showNotice("The turn stopped before the model finished. Send the prompt again.");
 							}
 							const next = await getState(bridge);
@@ -595,9 +840,40 @@ export function App(): React.ReactElement {
 				return;
 			}
 			if (sendingRef.current) return;
-			await sendTurn(`/${kind}`);
+			pickerRequestRef.current += 1;
+			const requestId = pickerRequestRef.current;
+			if (picker?.kind === kind) {
+				setPicker(null);
+				setStatus("idle");
+				return;
+			}
+			if (kind === "mode") {
+				const items = AGENT_MODES.map((id) => ({ id, label: id }));
+				setPicker({
+					title: "Mode",
+					kind: "mode",
+					items,
+					index: pickerStartIndex(items, state?.mode),
+				});
+				setStatus("picker");
+				return;
+			}
+			try {
+				const result = await getModels(bridge);
+				if (requestId !== pickerRequestRef.current) return;
+				setPicker({
+					title: "Model",
+					kind: "model",
+					items: result.items,
+					index: pickerStartIndex(result.items, state?.modelId),
+				});
+				setStatus("picker");
+			} catch (err) {
+				if (requestId !== pickerRequestRef.current) return;
+				noticeError(err);
+			}
 		},
-		[bridge, listening, sendTurn, status],
+		[bridge, listening, noticeError, picker, state, status],
 	);
 
 	const submit = useCallback(async () => {
@@ -605,7 +881,9 @@ export function App(): React.ReactElement {
 		const message = draft.trim();
 		const files = attachmentsRef.current;
 		if (!message && files.length === 0) return;
-		const slash = message ? resolveSlashSubmit(message) : undefined;
+		const slash = message
+			? resolveSlashSubmit(message, slashOpen ? slashItems[slashIndex] : undefined)
+			: undefined;
 		if (slash?.action === "hold") return;
 		if (slash?.action === "complete") {
 			setDraft(slash.line);
@@ -620,7 +898,18 @@ export function App(): React.ReactElement {
 			return;
 		}
 		await sendTurn(toSend, undefined, pendingFiles);
-	}, [bridge, draft, listening, sendTurn, setQueueSync, status, takeAttachments]);
+	}, [
+		bridge,
+		draft,
+		listening,
+		sendTurn,
+		setQueueSync,
+		slashIndex,
+		slashItems,
+		slashOpen,
+		status,
+		takeAttachments,
+	]);
 
 	const stop = useCallback(async () => {
 		if (!bridge) return;
@@ -670,6 +959,7 @@ export function App(): React.ReactElement {
 
 	const cancelPicker = useCallback(() => {
 		if (!picker) return;
+		pickerRequestRef.current += 1;
 		const next = draftAfterPicker(picker.kind);
 		setPicker(null);
 		setStatus("idle");
@@ -995,34 +1285,22 @@ export function App(): React.ReactElement {
 				return;
 			}
 			if (event.key === "Escape") {
-				if (editingUser) {
+				const action = composerEscapeAction(Boolean(editingUser), status);
+				if (action === "cancel-edit") {
 					event.preventDefault();
 					setEditingUser(null);
 					return;
 				}
-				if (status === "running" || status === "approval") {
+				if (action === "stop") {
 					event.preventDefault();
 					void stop();
 					return;
 				}
 			}
-			if (slashOpen && slashItems.length > 0) {
-				if (event.key === "ArrowDown") {
-					event.preventDefault();
-					setSlashIndex((index) => (index + 1) % slashItems.length);
-					return;
-				}
-				if (event.key === "ArrowUp") {
-					event.preventDefault();
-					setSlashIndex((index) => (index - 1 + slashItems.length) % slashItems.length);
-					return;
-				}
-				if (event.key === "Tab") {
-					event.preventDefault();
-					const selected = slashItems[slashIndex] ?? slashItems[0];
-					if (selected) setDraft(selected.arg ? `/${selected.name} ` : `/${selected.name}`);
-					return;
-				}
+			const slashKey = slashMenuKey(event.key, slashOpen, slashItems.length);
+			if (applySlashComposerKey(slashKey, slashItems, slashIndex, setSlashIndex, setDraft)) {
+				event.preventDefault();
+				return;
 			}
 			if (event.key === "Enter" && !event.shiftKey) {
 				event.preventDefault();
@@ -1032,37 +1310,10 @@ export function App(): React.ReactElement {
 		[editingUser, picker, slashIndex, slashItems, slashOpen, status, stop, submit],
 	);
 
-	const mediaMeta = state ? composerMediaMeta(state) : "";
+	const mediaModels = state ? composerMediaModels(state) : [];
 
-	if (bootError) {
-		return (
-			<div className="desk desk--boot">
-				<header className="desk-bar">
-					<LogoMark size={20} />
-					<h1>Caelence</h1>
-				</header>
-				<main className="desk-empty">
-					<p>{bootError}</p>
-					<p>Open this UI from the Caelence agent window, not a browser tab.</p>
-				</main>
-			</div>
-		);
-	}
-
-	if (!state) {
-		return (
-			<div className="desk desk--boot">
-				<header className="desk-bar">
-					<LogoMark size={20} />
-					<h1>Caelence</h1>
-					<span className="cel-chip cel-chip--run">
-						<span className="cel-chip__spin" aria-hidden="true" />
-						Starting
-					</span>
-				</header>
-			</div>
-		);
-	}
+	if (bootError) return <DeskBoot error={bootError} />;
+	if (!state) return <DeskBoot />;
 
 	const approvalPreview = pending ? previewInput(pending.input) : "";
 	const turnRunning = status === "running" || status === "approval";
@@ -1087,7 +1338,7 @@ export function App(): React.ReactElement {
 						aria-label={sideOpen ? "Hide sidebar" : "Show sidebar"}
 						onClick={() => setSideOpen((open) => !open)}
 					>
-						<SidebarSimple size={16} weight="regular" />
+						<SidebarSimpleIcon size={16} weight="regular" />
 					</button>
 				</div>
 				<button
@@ -1097,7 +1348,7 @@ export function App(): React.ReactElement {
 					aria-label="New chat"
 					onClick={() => void newChat()}
 				>
-					<Plus size={16} weight="regular" />
+					<PlusIcon size={16} weight="regular" />
 					<span>New chat</span>
 				</button>
 				<section className="desk-sessions" aria-label="Sessions">
@@ -1169,13 +1420,25 @@ export function App(): React.ReactElement {
 				</section>
 				<button
 					type="button"
+					className={`desk-settings-btn ${view === "skills" ? "is-on" : ""}`}
+					aria-label="Skills"
+					onClick={() => {
+						setView((current) => (current === "skills" ? "chat" : "skills"));
+						setSkillQuery("");
+					}}
+				>
+					<PuzzlePieceIcon size={16} weight="regular" />
+					<span>Skills</span>
+				</button>
+				<button
+					type="button"
 					className={`desk-settings-btn ${view === "integrations" ? "is-on" : ""}`}
 					aria-label="Integrations"
 					onClick={() =>
 						setView((current) => (current === "integrations" ? "chat" : "integrations"))
 					}
 				>
-					<Plugs size={16} weight="regular" />
+					<PlugsIcon size={16} weight="regular" />
 					<span>Integrations</span>
 				</button>
 				<button
@@ -1184,7 +1447,7 @@ export function App(): React.ReactElement {
 					aria-label="Settings"
 					onClick={() => setView((current) => (current === "settings" ? "chat" : "settings"))}
 				>
-					<Gear size={16} weight="regular" />
+					<GearIcon size={16} weight="regular" />
 					<span>Settings</span>
 				</button>
 			</aside>
@@ -1199,235 +1462,255 @@ export function App(): React.ReactElement {
 			>
 				<header className="desk-bar">
 					<div className="desk-id">
-						<h1>
-							{view === "settings" ? "Settings" : view === "integrations" ? "Integrations" : "Chat"}
-						</h1>
+						<h1>{mainViewTitle(view)}</h1>
 						{view === "chat" && state.spend ? <p>{state.spend}</p> : null}
 					</div>
 				</header>
 
-				{view === "settings" && bridge ? (
-					<SettingsPanel
-						bridge={bridge}
-						theme={theme}
-						onTheme={setTheme}
-						onSaved={(next) => setState(next)}
-						onNotice={showNotice}
-					/>
-				) : view === "integrations" && bridge ? (
-					<IntegrationsPanel bridge={bridge} onNotice={showNotice} />
-				) : (
-					<div className="desk-transcript" ref={transcriptRef}>
-						{lines.length === 0 && !thoughtPending ? (
-							<p className="desk-hint">Type a message, drop files, or / for commands</p>
-						) : (
-							<>
-								{transcriptBlocks.map((block, index) => {
-									if (block.type === "thought") {
-										const tools = thoughtTools(block.entries);
+				<div className="desk-stage">
+					{view !== "chat" ? (
+						<DeskSidePanel
+							view={view}
+							bridge={bridge}
+							theme={theme}
+							skillQuery={skillQuery}
+							onTheme={setTheme}
+							onSaved={(next) => setState(next)}
+							onNotice={showNotice}
+							onSkillQuery={setSkillQuery}
+						/>
+					) : (
+						<div className="desk-transcript" ref={transcriptRef}>
+							{lines.length === 0 && !thoughtPending ? (
+								<p className="desk-hint">Type a message, drop files, or / for commands</p>
+							) : (
+								<>
+									{transcriptBlocks.map((block, index) => {
+										if (block.type === "thought") {
+											const tools = thoughtTools(block.entries);
+											return (
+												<ThoughtFold
+													key={tools[0]?.key ?? `thought-${index}`}
+													entries={block.entries}
+													live={turnRunning && block.live}
+												/>
+											);
+										}
+										const line = block.line;
 										return (
-											<ThoughtFold
-												key={tools[0]?.key ?? `thought-${index}`}
-												entries={block.entries}
-												live={turnRunning && block.live}
+											<TranscriptLine
+												key={line.key}
+												line={line}
+												bridge={bridge}
+												editing={
+													line.type === "user" && editingUser?.index === line.userTurnIndex
+														? editingUser.text
+														: null
+												}
+												onStartEdit={
+													line.type === "user"
+														? () => setEditingUser({ index: line.userTurnIndex, text: line.text })
+														: undefined
+												}
+												onEditChange={(text) =>
+													setEditingUser((current) => (current ? { ...current, text } : current))
+												}
+												onEditSave={() => void commitEdit()}
+												onEditCancel={() => setEditingUser(null)}
+												onOpenUrl={(url) => {
+													void openExternal(url, bridge).catch((err: unknown) => {
+														noticeError(err);
+													});
+												}}
+												onOpenFile={(path, reveal) => {
+													void openLocalFile(path, reveal, bridge).catch((err: unknown) => {
+														noticeError(err);
+													});
+												}}
 											/>
 										);
-									}
-									const line = block.line;
-									return (
-										<TranscriptLine
-											key={line.key}
-											line={line}
-											bridge={bridge}
-											editing={
-												line.type === "user" && editingUser?.index === line.userTurnIndex
-													? editingUser.text
-													: null
-											}
-											onStartEdit={
-												line.type === "user"
-													? () => setEditingUser({ index: line.userTurnIndex, text: line.text })
-													: undefined
-											}
-											onEditChange={(text) =>
-												setEditingUser((current) => (current ? { ...current, text } : current))
-											}
-											onEditSave={() => void commitEdit()}
-											onEditCancel={() => setEditingUser(null)}
-											onOpenUrl={(url) => {
-												void openExternal(url, bridge).catch((err: unknown) => {
-													noticeError(err);
-												});
-											}}
-											onOpenFile={(path, reveal) => {
-												void openLocalFile(path, reveal, bridge).catch((err: unknown) => {
-													noticeError(err);
-												});
-											}}
-										/>
-									);
-								})}
-								{thoughtPending ? (
-									<ThoughtFold key="thinking" entries={[]} live warmupSeed={warmupSeed} />
-								) : null}
-							</>
-						)}
-					</div>
-				)}
-
-				{view === "chat" && pending ? (
-					<section className="desk-approve" aria-label="Approval needed">
-						<p>Approval needed · {pending.toolName}</p>
-						<pre className="cel-code">{approvalPreview}</pre>
-						<div className="desk-approve-actions">
-							<button
-								type="button"
-								className="cel-btn cel-btn--secondary cel-btn--compact"
-								onClick={() => void decide("yes")}
-							>
-								Approve
-							</button>
-							<button
-								type="button"
-								className="cel-btn cel-btn--secondary cel-btn--compact"
-								onClick={() => void decide("no")}
-							>
-								Deny
-							</button>
-							<button
-								type="button"
-								className="cel-btn cel-btn--tertiary cel-btn--compact"
-								onClick={() => void decide("always")}
-							>
-								Always this session
-							</button>
+									})}
+									{thoughtPending ? (
+										<ThoughtFold key="thinking" entries={[]} live warmupSeed={warmupSeed} />
+									) : null}
+								</>
+							)}
 						</div>
-					</section>
-				) : null}
+					)}
 
-				{view === "chat" ? (
-					<footer className="desk-composer">
-						{fileDrag ? <p className="desk-composer__drop">Drop files to attach</p> : null}
-						{view === "chat" && mediaMeta ? (
-							<div className={`desk-composer__meta${mediaOpen ? "" : " is-min"}`}>
-								{mediaOpen ? <p>{mediaMeta}</p> : null}
+					{view === "chat" && pending ? (
+						<section className="desk-approve" aria-label="Approval needed">
+							<p>Approval needed · {pending.toolName}</p>
+							<pre className="cel-code">{approvalPreview}</pre>
+							<div className="desk-approve-actions">
 								<button
 									type="button"
-									className="desk-composer__meta-toggle"
-									aria-expanded={mediaOpen}
-									aria-label={mediaOpen ? "Hide media models" : "Show media models"}
-									onClick={() => setMediaOpen((open) => !open)}
+									className="cel-btn cel-btn--secondary cel-btn--compact"
+									onClick={() => void decide("yes")}
 								>
-									{mediaOpen ? (
-										<CaretUp size={14} weight="bold" />
-									) : (
-										<CaretDown size={14} weight="bold" />
-									)}
+									Approve
+								</button>
+								<button
+									type="button"
+									className="cel-btn cel-btn--secondary cel-btn--compact"
+									onClick={() => void decide("no")}
+								>
+									Deny
+								</button>
+								<button
+									type="button"
+									className="cel-btn cel-btn--tertiary cel-btn--compact"
+									onClick={() => void decide("always")}
+								>
+									Always this session
 								</button>
 							</div>
-						) : null}
-						{queue.length > 0 ? (
-							<ul className="desk-queue" aria-label="Queued messages">
-								{queue.map((item) => (
-									<li key={item.id} className="desk-queue-item">
-										{editingQueuedId === item.id ? (
-											<textarea
-												className="cel-input desk-compose-input"
-												rows={2}
-												value={item.text}
-												aria-label="Edit queued message"
-												onChange={(event) =>
-													setQueueSync(setQueuedText(queueRef.current, item.id, event.target.value))
-												}
-												onKeyDown={(event) => {
-													if (event.key === "Enter" && !event.shiftKey) {
-														event.preventDefault();
+						</section>
+					) : null}
+
+					{view === "chat" ? (
+						<footer className="desk-composer">
+							{fileDrag ? <p className="desk-composer__drop">Drop files to attach</p> : null}
+							{queue.length > 0 ? (
+								<ul className="desk-queue" aria-label="Queued messages">
+									{queue.map((item) => (
+										<li key={item.id} className="desk-queue-item">
+											{editingQueuedId === item.id ? (
+												<textarea
+													className="cel-input desk-compose-input"
+													rows={2}
+													value={item.text}
+													aria-label="Edit queued message"
+													onChange={(event) =>
+														setQueueSync(
+															setQueuedText(queueRef.current, item.id, event.target.value),
+														)
+													}
+													onKeyDown={(event) => {
+														if (event.key === "Enter" && !event.shiftKey) {
+															event.preventDefault();
+															setQueueSync(updateQueued(queueRef.current, item.id, item.text));
+															setEditingQueuedId(null);
+														}
+														if (event.key === "Escape") {
+															event.preventDefault();
+															setEditingQueuedId(null);
+														}
+													}}
+													onBlur={() => {
 														setQueueSync(updateQueued(queueRef.current, item.id, item.text));
 														setEditingQueuedId(null);
-													}
-													if (event.key === "Escape") {
-														event.preventDefault();
-														setEditingQueuedId(null);
-													}
-												}}
-												onBlur={() => {
-													setQueueSync(updateQueued(queueRef.current, item.id, item.text));
-													setEditingQueuedId(null);
-												}}
-											/>
-										) : (
-											<div className="desk-queue-copy">
-												<AttachmentThumbs items={item.attachments ?? []} />
-												{item.text ? (
-													<button
-														type="button"
-														className="desk-queue-text"
-														onClick={() => setEditingQueuedId(item.id)}
-													>
-														{item.text}
-													</button>
-												) : null}
-											</div>
-										)}
-										<button
-											type="button"
-											className="cel-btn cel-btn--quiet cel-btn--compact"
-											aria-label="Remove from queue"
-											onClick={() => {
-												if (editingQueuedId === item.id) setEditingQueuedId(null);
-												setQueueSync(removeQueued(queueRef.current, item.id));
-											}}
-										>
-											<X size={16} weight="regular" />
-										</button>
-									</li>
-								))}
-							</ul>
-						) : null}
-						<div className="desk-composer__row">
-							<input
-								ref={fileInputRef}
-								className="visually-hidden"
-								type="file"
-								multiple
-								onChange={(event) => {
-									addFiles(Array.from(event.target.files ?? []));
-									event.target.value = "";
-								}}
-							/>
-							<fieldset
-								className={`desk-field desk-compose-box${attachments.length > 0 ? " has-files" : ""}`}
-								onDragEnter={onFileDragEnter}
-								onDragOver={onFileDragOver}
-								onDragLeave={onFileDragLeave}
-								onDrop={onFileDrop}
-							>
-								<legend className="visually-hidden">Message composer</legend>
-								{slashOpen && slashItems.length > 0 ? (
-									<div className="desk-slash cel-float">
-										{slashItems.map((item, index) => (
+													}}
+												/>
+											) : (
+												<div className="desk-queue-copy">
+													<AttachmentThumbs items={item.attachments ?? []} />
+													{item.text ? (
+														<button
+															type="button"
+															className="desk-queue-text"
+															onClick={() => setEditingQueuedId(item.id)}
+														>
+															{item.text}
+														</button>
+													) : null}
+												</div>
+											)}
 											<button
-												key={item.name}
 												type="button"
-												className={index === slashIndex ? "is-on" : undefined}
-												onClick={() => setDraft(item.arg ? `/${item.name} ` : `/${item.name}`)}
+												className="cel-btn cel-btn--quiet cel-btn--compact"
+												aria-label="Remove from queue"
+												onClick={() => {
+													if (editingQueuedId === item.id) setEditingQueuedId(null);
+													setQueueSync(removeQueued(queueRef.current, item.id));
+												}}
 											>
-												<span>
-													/{item.name}
-													{item.slot ? ` ${item.slot}` : ""}
-												</span>
-												<em>· {item.hint}</em>
+												<XIcon size={16} weight="regular" />
 											</button>
+										</li>
+									))}
+								</ul>
+							) : null}
+							{mediaModels.length > 0 && mediaOpen ? (
+								<section className="desk-composer__meta">
+									<h2 className="visually-hidden">Active media models</h2>
+									<p>
+										{mediaModels.map((item, index) => (
+											<span key={item.kind} className="desk-composer__meta-item">
+												{index > 0 ? (
+													<span className="desk-composer__meta-sep" aria-hidden="true">
+														·
+													</span>
+												) : null}
+												<span className="desk-composer__meta-kind">{item.kind}</span>
+												<span className="desk-composer__meta-name">{item.label}</span>
+											</span>
 										))}
-									</div>
+									</p>
+									<button
+										type="button"
+										className="desk-composer__meta-toggle"
+										aria-expanded
+										aria-label="Hide media models"
+										onClick={() => setMediaOpen(false)}
+									>
+										<XIcon size={14} weight="regular" />
+									</button>
+								</section>
+							) : null}
+							<div className="desk-composer__row">
+								<input
+									ref={fileInputRef}
+									className="visually-hidden"
+									type="file"
+									multiple
+									onChange={(event) => {
+										addFiles(Array.from(event.target.files ?? []));
+										event.target.value = "";
+									}}
+								/>
+								{mediaModels.length > 0 && !mediaOpen ? (
+									<button
+										type="button"
+										className="desk-composer__meta-toggle desk-composer__meta-toggle--peek"
+										aria-expanded={false}
+										aria-label="Show media models"
+										onClick={() => setMediaOpen(true)}
+									>
+										<CaretDownIcon size={14} weight="bold" />
+									</button>
 								) : null}
-								{picker ? (
-									<div className="desk-float cel-float" role="listbox" aria-label={picker.title}>
-										<p>{picker.title}</p>
-										<ul ref={pickerListRef}>
-											{picker.items.map((item, index) => {
-												const applied = state && item.id === pickerSelectedId(picker.kind, state);
-												return (
+								<fieldset
+									className={`desk-field desk-compose-box${attachments.length > 0 ? " has-files" : ""}`}
+									onDragEnter={onFileDragEnter}
+									onDragOver={onFileDragOver}
+									onDragLeave={onFileDragLeave}
+									onDrop={onFileDrop}
+								>
+									<legend className="visually-hidden">Message composer</legend>
+									{slashOpen && slashItems.length > 0 ? (
+										<div className="desk-slash cel-float">
+											{slashItems.map((item, index) => (
+												<button
+													key={item.name}
+													type="button"
+													className={index === slashIndex ? "is-on" : undefined}
+													onClick={() => setDraft(item.arg ? `/${item.name} ` : `/${item.name}`)}
+												>
+													<span>
+														/{item.name}
+														{item.slot ? ` ${item.slot}` : ""}
+													</span>
+													<em>· {item.hint}</em>
+												</button>
+											))}
+										</div>
+									) : null}
+									{picker ? (
+										<div className="desk-float cel-float" role="listbox" aria-label={picker.title}>
+											<p>{picker.title}</p>
+											<ul ref={pickerListRef}>
+												{picker.items.map((item, index) => (
 													<li key={item.id}>
 														<button
 															type="button"
@@ -1438,115 +1721,90 @@ export function App(): React.ReactElement {
 															onClick={() => void choosePicker(item)}
 														>
 															<span>{item.label}</span>
-															{applied ? <em>on</em> : item.hint ? <em>{item.hint}</em> : null}
+															{pickerItemHint(
+																Boolean(state && item.id === pickerSelectedId(picker.kind, state)),
+																item.hint,
+															)}
 														</button>
 													</li>
-												);
-											})}
-										</ul>
+												))}
+											</ul>
+											<button
+												type="button"
+												className="cel-btn cel-btn--quiet cel-btn--compact"
+												onClick={() => cancelPicker()}
+											>
+												Cancel
+											</button>
+										</div>
+									) : null}
+									<AttachmentThumbs items={attachments} onRemove={removeAttachment} />
+									<textarea
+										ref={inputRef}
+										className="cel-input desk-compose-input"
+										rows={1}
+										aria-label="Message"
+										value={draft}
+										placeholder={composePlaceholder(listening, status)}
+										disabled={listening}
+										onChange={(event) => setDraft(event.target.value)}
+										onKeyDown={onKeyDown}
+									/>
+									<div className="desk-compose-bar">
 										<button
 											type="button"
-											className="cel-btn cel-btn--quiet cel-btn--compact"
-											onClick={() => cancelPicker()}
+											className="desk-compose-icon"
+											aria-label="Add files"
+											onClick={() => fileInputRef.current?.click()}
 										>
-											Cancel
+											<PlusIcon size={16} weight="regular" />
 										</button>
+										<div className="desk-compose-bar__end">
+											<button
+												type="button"
+												className="desk-compose-model"
+												aria-label="Choose model"
+												disabled={status !== "idle" && status !== "picker"}
+												onClick={() => void openComposerPicker("model")}
+											>
+												<span>{state.modelTarget ?? state.modelLabel}</span>
+												<CaretDownIcon size={12} weight="bold" />
+											</button>
+											<button
+												type="button"
+												className="desk-compose-mode"
+												aria-label="Choose mode"
+												disabled={status !== "idle" && status !== "picker"}
+												onClick={() => void openComposerPicker("mode")}
+											>
+												<span className="desk-compose-mode__dot" aria-hidden="true" />
+												{titleCase(state.mode)}
+											</button>
+											<ComposeMicControl
+												status={status}
+												listening={listening}
+												onStop={() => void stop()}
+												onStopDictation={() => stopDictation()}
+												onStartDictation={() => void startDictation()}
+											/>
+											<button
+												type="button"
+												className={`desk-compose-send${draft.trim() || attachments.length > 0 ? " is-on" : ""}`}
+												disabled={listening || (!draft.trim() && attachments.length === 0)}
+												onClick={() => void submit()}
+												aria-label={
+													status === "running" || status === "approval" ? "Queue" : "Send"
+												}
+											>
+												<PaperPlaneTiltIcon size={16} weight="regular" />
+											</button>
+										</div>
 									</div>
-								) : null}
-								<AttachmentThumbs items={attachments} onRemove={removeAttachment} />
-								<textarea
-									ref={inputRef}
-									className="cel-input desk-compose-input"
-									rows={1}
-									aria-label="Message"
-									value={draft}
-									placeholder={
-										listening
-											? "Listening"
-											: status === "running"
-												? "Queue a follow-up"
-												: "Ask the project"
-									}
-									disabled={listening}
-									onChange={(event) => setDraft(event.target.value)}
-									onKeyDown={onKeyDown}
-								/>
-								<div className="desk-compose-bar">
-									<button
-										type="button"
-										className="desk-compose-icon"
-										aria-label="Add files"
-										onClick={() => fileInputRef.current?.click()}
-									>
-										<Plus size={16} weight="regular" />
-									</button>
-									<div className="desk-compose-bar__end">
-										<button
-											type="button"
-											className="desk-compose-model"
-											aria-label="Choose model"
-											disabled={status !== "idle" && status !== "picker"}
-											onClick={() => void openComposerPicker("model")}
-										>
-											<span>{state.modelTarget ?? state.modelLabel}</span>
-											<CaretDown size={12} weight="bold" />
-										</button>
-										<button
-											type="button"
-											className="desk-compose-mode"
-											aria-label="Choose mode"
-											disabled={status !== "idle" && status !== "picker"}
-											onClick={() => void openComposerPicker("mode")}
-										>
-											<span className="desk-compose-mode__dot" aria-hidden="true" />
-											{titleCase(state.mode)}
-										</button>
-										{status === "running" || status === "approval" ? (
-											<button
-												type="button"
-												className="desk-compose-icon"
-												aria-label="Stop"
-												onClick={() => void stop()}
-											>
-												<Square size={16} weight="regular" />
-											</button>
-										) : listening ? (
-											<button
-												type="button"
-												className="desk-compose-icon is-on"
-												aria-label="Stop dictation"
-												aria-pressed
-												onClick={() => stopDictation()}
-											>
-												<Microphone size={16} weight="regular" />
-											</button>
-										) : (
-											<button
-												type="button"
-												className="desk-compose-icon"
-												aria-label="Dictate"
-												aria-pressed={false}
-												disabled={status !== "idle"}
-												onClick={() => void startDictation()}
-											>
-												<Microphone size={16} weight="regular" />
-											</button>
-										)}
-										<button
-											type="button"
-											className={`desk-compose-send${draft.trim() || attachments.length > 0 ? " is-on" : ""}`}
-											disabled={listening || (!draft.trim() && attachments.length === 0)}
-											onClick={() => void submit()}
-											aria-label={status === "running" || status === "approval" ? "Queue" : "Send"}
-										>
-											<PaperPlaneTilt size={16} weight="regular" />
-										</button>
-									</div>
-								</div>
-							</fieldset>
-						</div>
-					</footer>
-				) : null}
+								</fieldset>
+							</div>
+						</footer>
+					) : null}
+				</div>
 				{notice ? (
 					<div className="desk-notice-host">
 						<FloatNotice key={notice.id} text={notice.text} onDismiss={dismissNotice} />
@@ -1570,7 +1828,7 @@ export function App(): React.ReactElement {
 							setSessionMenu(null);
 						}}
 					>
-						<PencilSimple size={16} weight="regular" />
+						<PencilSimpleIcon size={16} weight="regular" />
 						Rename
 					</button>
 					<button
@@ -1579,7 +1837,7 @@ export function App(): React.ReactElement {
 						className="is-danger"
 						onClick={() => void removeChat(sessionMenu.id)}
 					>
-						<Trash size={16} weight="regular" />
+						<TrashIcon size={16} weight="regular" />
 						Delete
 					</button>
 				</div>
@@ -1588,7 +1846,51 @@ export function App(): React.ReactElement {
 	);
 }
 
-function IntegrationMark(props: { item: PublicIntegration }): React.ReactElement {
+function IntegrationActions(
+	props: Readonly<{
+		pending: boolean;
+		connected: boolean;
+		onConnect: () => void;
+		onDisconnect: () => void;
+	}>,
+): React.ReactElement {
+	if (props.pending) {
+		return (
+			<span className="desk-integration-ok">
+				<span className="cel-chip__spin" aria-hidden="true" />
+				{props.connected ? "Disconnecting" : "Connecting"}
+			</span>
+		);
+	}
+	if (props.connected) {
+		return (
+			<>
+				<span className="desk-integration-ok">
+					<CheckIcon size={16} weight="regular" aria-hidden="true" />
+					Connected
+				</span>
+				<button
+					type="button"
+					className="cel-btn cel-btn--quiet cel-btn--compact"
+					onClick={props.onDisconnect}
+				>
+					Disconnect
+				</button>
+			</>
+		);
+	}
+	return (
+		<button
+			type="button"
+			className="cel-btn cel-btn--secondary cel-btn--compact"
+			onClick={props.onConnect}
+		>
+			Connect
+		</button>
+	);
+}
+
+function IntegrationMark(props: Readonly<{ item: PublicIntegration }>): React.ReactElement {
 	const [failed, setFailed] = useState(false);
 	if (failed) {
 		return <span className="desk-integration-glyph desk-integration-mark">{props.item.glyph}</span>;
@@ -1600,12 +1902,14 @@ function IntegrationMark(props: { item: PublicIntegration }): React.ReactElement
 	);
 }
 
-function IntegrationRow(props: {
-	item: PublicIntegration;
-	pending: boolean;
-	onConnect: () => void;
-	onDisconnect: () => void;
-}): React.ReactElement {
+function IntegrationRow(
+	props: Readonly<{
+		item: PublicIntegration;
+		pending: boolean;
+		onConnect: () => void;
+		onDisconnect: () => void;
+	}>,
+): React.ReactElement {
 	const { item } = props;
 	return (
 		<li>
@@ -1615,43 +1919,23 @@ function IntegrationRow(props: {
 				<em>{item.description}</em>
 			</div>
 			<div className="desk-integration-actions">
-				{props.pending ? (
-					<span className="desk-integration-ok">
-						<span className="cel-chip__spin" aria-hidden="true" />
-						{item.connected ? "Disconnecting" : "Connecting"}
-					</span>
-				) : item.connected ? (
-					<>
-						<span className="desk-integration-ok">
-							<Check size={16} weight="regular" aria-hidden="true" />
-							Connected
-						</span>
-						<button
-							type="button"
-							className="cel-btn cel-btn--quiet cel-btn--compact"
-							onClick={props.onDisconnect}
-						>
-							Disconnect
-						</button>
-					</>
-				) : (
-					<button
-						type="button"
-						className="cel-btn cel-btn--secondary cel-btn--compact"
-						onClick={props.onConnect}
-					>
-						Connect
-					</button>
-				)}
+				<IntegrationActions
+					pending={props.pending}
+					connected={item.connected}
+					onConnect={props.onConnect}
+					onDisconnect={props.onDisconnect}
+				/>
 			</div>
 		</li>
 	);
 }
 
-function IntegrationsPanel(props: {
-	bridge: BridgeClient;
-	onNotice: (text: string) => void;
-}): React.ReactElement {
+function IntegrationsPanel(
+	props: Readonly<{
+		bridge: BridgeClient;
+		onNotice: (text: string) => void;
+	}>,
+): React.ReactElement {
 	const [items, setItems] = useState<PublicIntegration[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [loadFailed, setLoadFailed] = useState(false);
@@ -1666,7 +1950,7 @@ function IntegrationsPanel(props: {
 			.catch((err: unknown) => {
 				if (!alive) return;
 				setLoadFailed(true);
-				props.onNotice(err instanceof Error ? err.message : String(err));
+				props.onNotice(errorMessage(err));
 			});
 		return () => {
 			alive = false;
@@ -1689,7 +1973,7 @@ function IntegrationsPanel(props: {
 					: await disconnectIntegration(props.bridge, id);
 			setItems(result.items);
 		} catch (err) {
-			props.onNotice(err instanceof Error ? err.message : String(err));
+			props.onNotice(errorMessage(err));
 		} finally {
 			setPendingId(null);
 		}
@@ -1793,13 +2077,15 @@ function IntegrationsPanel(props: {
 	);
 }
 
-function SettingsPanel(props: {
-	bridge: BridgeClient;
-	theme: ThemeChoice;
-	onTheme: (theme: ThemeChoice) => void;
-	onSaved: (state: DesktopState) => void;
-	onNotice: (text: string) => void;
-}): React.ReactElement {
+function SettingsPanel(
+	props: Readonly<{
+		bridge: BridgeClient;
+		theme: ThemeChoice;
+		onTheme: (theme: ThemeChoice) => void;
+		onSaved: (state: DesktopState) => void;
+		onNotice: (text: string) => void;
+	}>,
+): React.ReactElement {
 	const [settings, setSettings] = useState<DesktopSettings | null>(null);
 	const [apiKey, setApiKey] = useState("");
 	const [googleClientId, setGoogleClientId] = useState("");
@@ -1853,7 +2139,7 @@ function SettingsPanel(props: {
 						props.onSaved(result.state);
 						setSaved(true);
 					} catch (err) {
-						props.onNotice(err instanceof Error ? err.message : String(err));
+						props.onNotice(errorMessage(err));
 					}
 				})();
 			}}
@@ -1957,11 +2243,13 @@ function SettingsPanel(props: {
 	);
 }
 
-function ThoughtFold(props: {
-	entries: FoldEntry[];
-	live: boolean;
-	warmupSeed?: number;
-}): React.ReactElement {
+function ThoughtFold(
+	props: Readonly<{
+		entries: FoldEntry[];
+		live: boolean;
+		warmupSeed?: number;
+	}>,
+): React.ReactElement {
 	const { entries, live, warmupSeed } = props;
 	const tools = thoughtTools(entries);
 	const summary = thoughtSummary(tools, live, {
@@ -1989,12 +2277,12 @@ function ThoughtFold(props: {
 				</span>
 			</summary>
 			<div className="desk-thought__body">
-				{entries.map((entry, index) => {
+				{entries.map((entry) => {
 					if (entry.type === "note") {
 						const text = entry.text.trim();
 						if (!text) return null;
 						return (
-							<p key={`note-${index}`} className="desk-thought__reasoning">
+							<p key={`note-${text}`} className="desk-thought__reasoning">
 								{text}
 							</p>
 						);
@@ -2006,7 +2294,7 @@ function ThoughtFold(props: {
 	);
 }
 
-function ToolEventRow(props: { line: ToolLine }): React.ReactElement {
+function ToolEventRow(props: Readonly<{ line: ToolLine }>): React.ReactElement {
 	const { line } = props;
 	const count = eventCountSuffix(line.count);
 	return (
@@ -2015,7 +2303,7 @@ function ToolEventRow(props: { line: ToolLine }): React.ReactElement {
 				{line.status === "running" ? (
 					<span className="desk-event__spin" aria-hidden="true" />
 				) : (
-					<Gear size={16} weight="regular" aria-hidden="true" />
+					<GearIcon size={16} weight="regular" aria-hidden="true" />
 				)}
 				<span>
 					{line.label}
@@ -2029,80 +2317,104 @@ function ToolEventRow(props: { line: ToolLine }): React.ReactElement {
 	);
 }
 
-function TranscriptLine(props: {
-	line: StreamLine;
-	bridge: BridgeClient | null;
-	editing?: string | null;
-	onStartEdit?: () => void;
-	onEditChange?: (text: string) => void;
-	onEditSave?: () => void;
-	onEditCancel?: () => void;
-	onOpenUrl?: (url: string) => void;
-	onOpenFile?: (path: string, reveal: boolean) => void;
-}): React.ReactElement {
+function UserTranscriptLine(
+	props: Readonly<{
+		line: Extract<StreamLine, { type: "user" }>;
+		editing?: string | null;
+		onStartEdit?: () => void;
+		onEditChange?: (text: string) => void;
+		onEditSave?: () => void;
+		onEditCancel?: () => void;
+	}>,
+): React.ReactElement {
+	const editing = props.editing != null;
+	return (
+		<article className={`desk-line desk-line--user${editing ? " is-editing" : ""}`}>
+			<p className="desk-line__who">
+				{!editing && props.onStartEdit ? (
+					<button
+						type="button"
+						className="cel-btn cel-btn--quiet cel-btn--compact desk-line__edit-btn"
+						onClick={props.onStartEdit}
+					>
+						<PencilSimpleIcon size={16} weight="regular" />
+						Edit
+					</button>
+				) : null}
+				<span>You</span>
+			</p>
+			<div className="desk-line__body">
+				{editing ? (
+					<>
+						<textarea
+							className="cel-input desk-compose-input"
+							rows={3}
+							value={props.editing ?? ""}
+							aria-label="Edit message"
+							onChange={(event) => props.onEditChange?.(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter" && !event.shiftKey) {
+									event.preventDefault();
+									props.onEditSave?.();
+								}
+								if (event.key === "Escape") {
+									event.preventDefault();
+									props.onEditCancel?.();
+								}
+							}}
+						/>
+						<div className="desk-line__edit-actions">
+							<button
+								type="button"
+								className="cel-btn cel-btn--secondary cel-btn--compact"
+								onClick={props.onEditSave}
+							>
+								Save
+							</button>
+							<button
+								type="button"
+								className="cel-btn cel-btn--quiet cel-btn--compact"
+								onClick={props.onEditCancel}
+							>
+								Cancel
+							</button>
+						</div>
+					</>
+				) : (
+					<>
+						<AttachmentThumbs items={props.line.attachments ?? []} variant="chat" />
+						{props.line.text ? <p>{props.line.text}</p> : null}
+					</>
+				)}
+			</div>
+		</article>
+	);
+}
+
+function TranscriptLine(
+	props: Readonly<{
+		line: StreamLine;
+		bridge: BridgeClient | null;
+		editing?: string | null;
+		onStartEdit?: () => void;
+		onEditChange?: (text: string) => void;
+		onEditSave?: () => void;
+		onEditCancel?: () => void;
+		onOpenUrl?: (url: string) => void;
+		onOpenFile?: (path: string, reveal: boolean) => void;
+	}>,
+): React.ReactElement {
 	const { line, bridge, onOpenUrl, onOpenFile } = props;
 	if (line.type === "user") {
-		const editing = props.editing != null;
 		return (
-			<article className={`desk-line desk-line--user${editing ? " is-editing" : ""}`}>
-				<p className="desk-line__who">
-					{!editing && props.onStartEdit ? (
-						<button
-							type="button"
-							className="cel-btn cel-btn--quiet cel-btn--compact desk-line__edit-btn"
-							onClick={props.onStartEdit}
-						>
-							<PencilSimple size={16} weight="regular" />
-							Edit
-						</button>
-					) : null}
-					<span>You</span>
-				</p>
-				<div className="desk-line__body">
-					{editing ? (
-						<>
-							<textarea
-								className="cel-input desk-compose-input"
-								rows={3}
-								value={props.editing ?? ""}
-								aria-label="Edit message"
-								onChange={(event) => props.onEditChange?.(event.target.value)}
-								onKeyDown={(event) => {
-									if (event.key === "Enter" && !event.shiftKey) {
-										event.preventDefault();
-										props.onEditSave?.();
-									}
-									if (event.key === "Escape") {
-										event.preventDefault();
-										props.onEditCancel?.();
-									}
-								}}
-							/>
-							<div className="desk-line__edit-actions">
-								<button
-									type="button"
-									className="cel-btn cel-btn--secondary cel-btn--compact"
-									onClick={props.onEditSave}
-								>
-									Save
-								</button>
-								<button
-									type="button"
-									className="cel-btn cel-btn--quiet cel-btn--compact"
-									onClick={props.onEditCancel}
-								>
-									Cancel
-								</button>
-							</div>
-						</>
-					) : (
-						<>
-							<AttachmentThumbs items={line.attachments ?? []} variant="chat" />
-							{line.text ? <p>{line.text}</p> : null}
-						</>
-					)}
-				</div>
-			</article>
+			<UserTranscriptLine
+				line={line}
+				editing={props.editing}
+				onStartEdit={props.onStartEdit}
+				onEditChange={props.onEditChange}
+				onEditSave={props.onEditSave}
+				onEditCancel={props.onEditCancel}
+			/>
 		);
 	}
 	if (line.type === "assistant") {
@@ -2128,7 +2440,7 @@ function TranscriptLine(props: {
 					{line.status === "running" ? (
 						<span className="desk-event__spin" aria-hidden="true" />
 					) : (
-						<Gear size={16} weight="regular" aria-hidden="true" />
+						<GearIcon size={16} weight="regular" aria-hidden="true" />
 					)}
 					<span>
 						{line.label}
@@ -2154,7 +2466,9 @@ function TranscriptLine(props: {
 				<p className="desk-line__who">Agent</p>
 				<div className="desk-line__body">
 					{line.kind === "video" ? (
-						<video className="desk-preview desk-preview--img" controls src={line.src} />
+						<video className="desk-preview desk-preview--img" controls src={line.src}>
+							<track kind="captions" srcLang="en" label="Captions" src={SILENT_CAPTIONS} />
+						</video>
 					) : (
 						<img className="desk-preview desk-preview--img" src={line.src} alt={line.caption} />
 					)}
@@ -2170,25 +2484,27 @@ function TranscriptLine(props: {
 	);
 }
 
-function RichBody(props: {
-	text: string;
-	bridge: BridgeClient | null;
-	onOpenUrl?: (url: string) => void;
-	onOpenFile?: (path: string, reveal: boolean) => void;
-}): React.ReactElement {
+function RichBody(
+	props: Readonly<{
+		text: string;
+		bridge: BridgeClient | null;
+		onOpenUrl?: (url: string) => void;
+		onOpenFile?: (path: string, reveal: boolean) => void;
+	}>,
+): React.ReactElement {
 	const parts = splitRichText(props.text);
 	return (
 		<div className="desk-rich">
 			{parts.map((part, index) => {
 				if (part.type === "text") {
-					const next = parts[index + 1];
+					const next = parts.at(index + 1);
 					if (next?.type === "image" && /^\s*Preview:?\s*$/i.test(part.text)) return null;
-					return <span key={index}>{part.text}</span>;
+					return <span key={richPartKey(part)}>{part.text}</span>;
 				}
 				if (part.type === "file") {
 					return (
 						<FileLink
-							key={index}
+							key={richPartKey(part)}
 							path={part.path}
 							label={part.label}
 							onOpenFile={props.onOpenFile}
@@ -2204,7 +2520,7 @@ function RichBody(props: {
 						)?.href;
 					return (
 						<PreviewFrame
-							key={index}
+							key={richPartKey(part)}
 							src={part.src}
 							title={part.alt}
 							viewHref={viewHref}
@@ -2215,7 +2531,7 @@ function RichBody(props: {
 				}
 				return (
 					<ExternalLink
-						key={index}
+						key={richPartKey(part)}
 						href={part.href}
 						label={part.label}
 						onOpenUrl={props.onOpenUrl}
@@ -2226,11 +2542,13 @@ function RichBody(props: {
 	);
 }
 
-function FileLink(props: {
-	path: string;
-	label: string;
-	onOpenFile?: (path: string, reveal: boolean) => void;
-}): React.ReactElement {
+function FileLink(
+	props: Readonly<{
+		path: string;
+		label: string;
+		onOpenFile?: (path: string, reveal: boolean) => void;
+	}>,
+): React.ReactElement {
 	return (
 		<span className="desk-file">
 			<button
@@ -2246,32 +2564,36 @@ function FileLink(props: {
 				aria-label={`Show ${props.label} in folder`}
 				onClick={() => props.onOpenFile?.(props.path, true)}
 			>
-				<FolderSimple size={16} weight="regular" aria-hidden="true" />
+				<FolderSimpleIcon size={16} weight="regular" aria-hidden="true" />
 			</button>
 		</span>
 	);
 }
 
-function ExternalLink(props: {
-	href: string;
-	label: string;
-	onOpenUrl?: (url: string) => void;
-}): React.ReactElement {
+function ExternalLink(
+	props: Readonly<{
+		href: string;
+		label: string;
+		onOpenUrl?: (url: string) => void;
+	}>,
+): React.ReactElement {
 	return (
 		<button type="button" className="desk-link" onClick={() => props.onOpenUrl?.(props.href)}>
 			<span>{props.label}</span>
-			<ArrowUpRight size={16} weight="regular" aria-hidden="true" />
+			<ArrowUpRightIcon size={16} weight="regular" aria-hidden="true" />
 		</button>
 	);
 }
 
-function PreviewFrame(props: {
-	src: string;
-	title: string;
-	viewHref?: string;
-	bridge: BridgeClient | null;
-	onOpenUrl?: (url: string) => void;
-}): React.ReactElement {
+function PreviewFrame(
+	props: Readonly<{
+		src: string;
+		title: string;
+		viewHref?: string;
+		bridge: BridgeClient | null;
+		onOpenUrl?: (url: string) => void;
+	}>,
+): React.ReactElement {
 	const [blobSrc, setBlobSrc] = useState<string | null>(null);
 	const [mode, setMode] = useState<"load" | "frame" | "expired">("load");
 	const openHref = props.viewHref ?? canvaViewUrl(props.src) ?? props.src;
@@ -2328,7 +2650,7 @@ function PreviewFrame(props: {
 		<div className="desk-preview desk-preview--empty" aria-busy="true">
 			<span className="cel-chip cel-chip--run">
 				<span className="cel-chip__spin" aria-hidden="true" />
-				Preview
+				{"Preview"}
 			</span>
 		</div>
 	);

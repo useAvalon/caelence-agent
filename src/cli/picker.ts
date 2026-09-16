@@ -46,3 +46,49 @@ export function stepIndex(index: number, count: number, delta: number): number {
 	if (count <= 0) return 0;
 	return (index + delta + count) % count;
 }
+
+export const PICKER_PAGE = 8;
+/** Header, picker title, hint, and vertical margins. */
+export const PICKER_RESERVED_ROWS = 6;
+
+/** How many picker rows fit in the terminal after chrome. */
+export function pickerVisibleRows(terminalRows: number): number {
+	return Math.max(4, terminalRows - PICKER_RESERVED_ROWS);
+}
+
+/** Visible slice of a long picker, keeping the selected row on screen. */
+export function pickerPage<T>(
+	items: T[],
+	index: number,
+	size = PICKER_PAGE,
+): { items: T[]; offset: number } {
+	if (items.length <= size) return { items, offset: 0 };
+	const clamped = Math.min(Math.max(index, 0), items.length - 1);
+	const start = Math.min(Math.max(0, clamped - Math.floor(size / 2)), items.length - size);
+	return { items: items.slice(start, start + size), offset: start };
+}
+
+type InkPickerKey = {
+	escape: boolean;
+	upArrow: boolean;
+	downArrow: boolean;
+	tab: boolean;
+	shift: boolean;
+	return: boolean;
+};
+
+/** Arrow keys arrive as ESC+[+A — treat movement before cancel. */
+export function inkPickerNav(key: InkPickerKey): "esc" | "enter" | number | undefined {
+	if (key.upArrow || (key.tab && key.shift)) return -1;
+	if (key.downArrow || key.tab) return 1;
+	if (key.return) return "enter";
+	if (key.escape) return "esc";
+	return undefined;
+}
+
+/** Pad to width so Ink does not leave leftover cells from a longer previous row. */
+export function paintPickerLine(text: string, width: number): string {
+	const max = Math.max(1, width);
+	const body = text.length > max ? `${text.slice(0, max - 1)}…` : text;
+	return body.padEnd(max, " ");
+}

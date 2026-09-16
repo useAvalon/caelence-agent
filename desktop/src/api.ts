@@ -185,6 +185,51 @@ export function getIntegrations(bridge: BridgeClient): Promise<{ items: PublicIn
 	return request(bridge, "/integrations");
 }
 
+export interface PublicSkill {
+	id: string;
+	name: string;
+	description: string;
+	origin: "bundled" | "skills.sh";
+	source: string;
+	installs?: number;
+	status: "off" | "user" | "project";
+}
+
+export interface SkillsPage {
+	bundled: PublicSkill[];
+	popular: PublicSkill[];
+	loaded: PublicSkill[];
+}
+
+export function getSkills(bridge: BridgeClient): Promise<SkillsPage> {
+	return request(bridge, "/skills");
+}
+
+export function getPopularSkills(bridge: BridgeClient): Promise<{ popular: PublicSkill[] }> {
+	return request(bridge, "/skills/popular");
+}
+
+export function searchSkills(bridge: BridgeClient, q: string): Promise<{ items: PublicSkill[] }> {
+	return request(bridge, `/skills/search?q=${encodeURIComponent(q)}`);
+}
+
+export function addSkill(bridge: BridgeClient, id: string): Promise<{ ok: boolean } & SkillsPage> {
+	return request(bridge, "/skills/add", {
+		method: "POST",
+		body: JSON.stringify({ id }),
+	});
+}
+
+export function removeSkill(
+	bridge: BridgeClient,
+	id: string,
+): Promise<{ ok: boolean } & SkillsPage> {
+	return request(bridge, "/skills/remove", {
+		method: "POST",
+		body: JSON.stringify({ id }),
+	});
+}
+
 export function connectIntegration(
 	bridge: BridgeClient,
 	connectorId: string,
@@ -377,8 +422,7 @@ export async function filesFromDroppedPaths(paths: string[]): Promise<File[]> {
 				path: trimmed,
 			});
 			const raw = atob(item.data);
-			const bytes = new Uint8Array(raw.length);
-			for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+			const bytes = Uint8Array.from(raw, (ch) => ch.codePointAt(0) ?? 0);
 			files.push(new File([bytes], item.name, { type: item.mime }));
 		} catch {
 			// skip unreadable paths
@@ -423,7 +467,14 @@ export async function startTurn(
 		return (await res.json()) as { outcome?: SlashOutcome; state?: DesktopState };
 	}
 	if (!res.body) return;
-	const reader = res.body.getReader();
+	await readSse(res.body, onEvent);
+}
+
+async function readSse(
+	body: ReadableStream<Uint8Array>,
+	onEvent?: (event: AgentEvent) => void,
+): Promise<void> {
+	const reader = body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = "";
 	while (true) {
@@ -446,6 +497,7 @@ export function isAbortError(err: unknown): boolean {
 	if (!err || typeof err !== "object") return false;
 	const name = (err as { name?: unknown }).name;
 	if (name === "AbortError" || name === "CancelledError") return true;
-	const message = err instanceof Error ? err.message : String(err);
-	return /aborted|The operation was aborted/i.test(message);
+	if (err instanceof Error) return /aborted|The operation was aborted/i.test(err.message);
+	if (typeof err === "string") return /aborted|The operation was aborted/i.test(err);
+	return false;
 }

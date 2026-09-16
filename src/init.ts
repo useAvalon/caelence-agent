@@ -4,6 +4,8 @@ import { join } from "node:path";
 export interface InitOptions {
 	cwd: string;
 	name?: string;
+	/** Write harness.config.ts, AGENTS.md, a sample skill, and a smoke eval. */
+	examples?: boolean;
 }
 
 const AGENTS = `# Agent instructions
@@ -51,7 +53,7 @@ function configSource(name: string): string {
 
 export default {
 	name: ${JSON.stringify(name)},
-	model: "~x-ai/grok-latest",
+	model: "openrouter/auto",
 	instructionsFile: "AGENTS.md",
 	skillsDir: "skills",
 	evalsDir: "evals",
@@ -78,13 +80,33 @@ function writeNew(
 	created.push(rel);
 }
 
-/** Write host-project files. Existing files are left untouched. */
+function ignoreHarnessDir(cwd: string, created: string[], skipped: string[]): void {
+	const gitignorePath = join(cwd, ".gitignore");
+	if (existsSync(gitignorePath)) {
+		const current = readFileSync(gitignorePath, "utf8");
+		if (!current.split("\n").some((line) => line.trim() === ".harness/")) {
+			appendFileSync(gitignorePath, current.endsWith("\n") ? ".harness/\n" : "\n.harness/\n");
+			created.push(".gitignore (append .harness/)");
+		} else {
+			skipped.push(".gitignore");
+		}
+		return;
+	}
+	writeFileSync(gitignorePath, ".harness/\n", "utf8");
+	created.push(".gitignore");
+}
+
+/** Ignore `.harness/`. With `examples`, also write a host scaffold. Existing files stay. */
 export function initHost(options: InitOptions): { created: string[]; skipped: string[] } {
 	const cwd = options.cwd;
-	const name = options.name ?? "caelence";
 	const created: string[] = [];
 	const skipped: string[] = [];
 
+	ignoreHarnessDir(cwd, created, skipped);
+
+	if (!options.examples) return { created, skipped };
+
+	const name = options.name ?? "caelence";
 	mkdirSync(join(cwd, "skills", "hello"), { recursive: true });
 	mkdirSync(join(cwd, "evals", "smoke"), { recursive: true });
 
@@ -98,20 +120,6 @@ export function initHost(options: InitOptions): { created: string[]; skipped: st
 	writeNew(join(cwd, "AGENTS.md"), AGENTS, created, skipped, "AGENTS.md");
 	writeNew(join(cwd, "skills/hello/SKILL.md"), SKILL, created, skipped, "skills/hello/SKILL.md");
 	writeNew(join(cwd, "evals/smoke/eval.ts"), EVAL, created, skipped, "evals/smoke/eval.ts");
-
-	const gitignorePath = join(cwd, ".gitignore");
-	if (existsSync(gitignorePath)) {
-		const current = readFileSync(gitignorePath, "utf8");
-		if (!current.split("\n").some((line) => line.trim() === ".harness/")) {
-			appendFileSync(gitignorePath, current.endsWith("\n") ? ".harness/\n" : "\n.harness/\n");
-			created.push(".gitignore (append .harness/)");
-		} else {
-			skipped.push(".gitignore");
-		}
-	} else {
-		writeFileSync(gitignorePath, ".harness/\n", "utf8");
-		created.push(".gitignore");
-	}
 
 	return { created, skipped };
 }

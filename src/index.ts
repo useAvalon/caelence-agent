@@ -88,13 +88,34 @@ export {
 	startObservability,
 	WEBSITE_GENERATION_REGRESSION,
 } from "./observability/index.ts";
-export { PRODUCT_NAME } from "./product.ts";
+export { CLI_NAME, PRODUCT_NAME } from "./product.ts";
 export { type CreateHarnessOptions, createHarness, type HarnessRuntime } from "./runtime.ts";
 export { authorSkillMarkdown, SKILL_AUTHOR_SYSTEM } from "./skills/author-skill.ts";
+export {
+	browseSkillCatalog,
+	buildSkillsPage,
+	bundledSkillHits,
+	type CatalogSkill,
+	cachedPopularSkills,
+	decorateCatalogSkill,
+	formatInstallCount,
+	POPULAR_SKILL_SEED,
+	refreshPopularSkills,
+	type SkillsPage,
+	skillBlurb,
+	withDisabledCatalogSkills,
+} from "./skills/catalog.ts";
 export { createHostSkill, parseSkillNewArgs, unwrapMarkdownFence } from "./skills/create-skill.ts";
+export {
+	disableSkills,
+	enableSkills,
+	isSkillDisabled,
+	readDisabledSkillNames,
+} from "./skills/disabled.ts";
 export {
 	bundledSkillsDir,
 	CONVENTIONAL_HOST_SKILL_DIRS,
+	isBundledCatalogDir,
 	listBundledSkills,
 	loadMergedSkills,
 	loadSkills,
@@ -114,10 +135,13 @@ export {
 	parseBundledSkillRef,
 	parseSkillSource,
 	removeSkillFromRoots,
+	searchSkillCatalog,
 	searchSkills,
 	searchSkillsSh,
+	skillCatalogRef,
+	skillIsCatalogHit,
 } from "./skills/registry.ts";
-export { parseSkillCommand, SKILL_COMMAND_USAGE } from "./skills/skill-command.ts";
+export { parseSkillCommand, SKILL_COMMAND_USAGE, SKILL_FIND_HINT } from "./skills/skill-command.ts";
 export { userSkillsDir } from "./skills/user-dir.ts";
 export { createGitTools } from "./tools/git.ts";
 export { createLocalTools } from "./tools/local.ts";

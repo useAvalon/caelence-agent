@@ -156,9 +156,9 @@
 	color: var(--text-tertiary);
 }
 .cel-input:focus-visible {
-	outline: 1.5px solid var(--action);
+	outline: 1.5px solid var(--measure);
 	outline-offset: 1px;
-	border-color: var(--action);
+	border-color: var(--measure);
 }
 .cel-input:disabled {
 	opacity: 0.5;

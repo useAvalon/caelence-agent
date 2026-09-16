@@ -4,6 +4,7 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveOpenRouter } from "../config.ts";
 import type { ApprovalRequest } from "../core/approval.ts";
+import { errorMessage } from "../core/errors.ts";
 import type { AgentEvent } from "../core/events.ts";
 import type { Session } from "../core/session.ts";
 import { formatUsage, type TokenUsage } from "../core/usage.ts";
@@ -13,7 +14,15 @@ import type { HarnessRuntime } from "../runtime.ts";
 import { formatMediaComposerLine } from "./media-models.ts";
 import { HARNESS_MODELS } from "./models.ts";
 import { cachedLiveTargetNames, loadLiveTargetNames } from "./openrouter-live.ts";
-import { type PickerItem, sessionPickerItems, stepIndex } from "./picker.ts";
+import {
+	inkPickerNav,
+	type PickerItem,
+	paintPickerLine,
+	pickerPage,
+	pickerVisibleRows,
+	sessionPickerItems,
+	stepIndex,
+} from "./picker.ts";
 import { plainTerminalText } from "./plain-text.ts";
 import {
 	completeSlashCommand,
@@ -73,7 +82,7 @@ function previewInput(input: Record<string, unknown>): string {
 function applyEvent(lines: StreamLine[], event: AgentEvent): StreamLine[] {
 	switch (event.kind) {
 		case "text_delta": {
-			const last = lines[lines.length - 1];
+			const last = lines.at(-1);
 			if (last?.type === "assistant") {
 				return [...lines.slice(0, -1), { ...last, text: last.text + event.text }];
 			}
@@ -147,23 +156,31 @@ function useTerminalSize(): { columns: number; rows: number } {
 	return size;
 }
 
-function Header(props: {
-	theme: Theme;
-	name: string;
-	model: string;
-	cwd: string;
-	title: string;
-	status: UiStatus;
-	mode: string;
-	spend?: string;
-}): React.ReactElement {
-	const mark = props.status === "running" ? "·" : props.status === "approval" ? "!" : "●";
-	const color =
-		props.status === "running"
-			? props.theme.action
-			: props.status === "approval"
-				? props.theme.warning
-				: props.theme.brand;
+function headerStatusMark(status: UiStatus): string {
+	if (status === "running") return "·";
+	if (status === "approval") return "!";
+	return "●";
+}
+
+function headerStatusColor(status: UiStatus, theme: Theme): string {
+	if (status === "running") return theme.action;
+	if (status === "approval") return theme.warning;
+	return theme.brand;
+}
+
+function Header(
+	props: Readonly<{
+		theme: Theme;
+		model: string;
+		cwd: string;
+		title: string;
+		status: UiStatus;
+		mode: string;
+		spend?: string;
+	}>,
+): React.ReactElement {
+	const mark = headerStatusMark(props.status);
+	const color = headerStatusColor(props.status, props.theme);
 	const label = modelLabel(props.model);
 	const target = cachedLiveTargetNames().get(props.model);
 	return (
@@ -186,13 +203,15 @@ function Header(props: {
 	);
 }
 
-function Sidebar(props: {
-	theme: Theme;
-	width: number;
-	height: number;
-	sessions: PickerItem[];
-	currentId?: string;
-}): React.ReactElement {
+function Sidebar(
+	props: Readonly<{
+		theme: Theme;
+		width: number;
+		height: number;
+		sessions: PickerItem[];
+		currentId?: string;
+	}>,
+): React.ReactElement {
 	const inner = Math.max(8, props.width - 2);
 	const slots = Math.max(3, props.height - 6);
 	const items = props.sessions.slice(0, slots);
@@ -232,94 +251,122 @@ function Sidebar(props: {
 	);
 }
 
-function StreamView(props: { theme: Theme; lines: StreamLine[] }): React.ReactElement {
+function toolStatusMark(status: ToolStatus): string {
+	if (status === "running") return "…";
+	if (status === "ok") return "✓";
+	return "×";
+}
+
+function toolStatusColor(status: ToolStatus, theme: Theme): string {
+	if (status === "running") return theme.action;
+	if (status === "ok") return theme.done;
+	return theme.danger;
+}
+
+function StreamLineView(props: Readonly<{ theme: Theme; line: StreamLine }>): React.ReactElement {
+	const { theme, line } = props;
+	if (line.type === "user") {
+		return (
+			<Box marginBottom={1}>
+				<Text color={theme.brand}>› </Text>
+				<Text color={theme.ink}>{line.text}</Text>
+			</Box>
+		);
+	}
+	if (line.type === "assistant") {
+		return (
+			<Box marginBottom={1}>
+				<Text color={theme.ink}>{plainTerminalText(line.text)}</Text>
+			</Box>
+		);
+	}
+	if (line.type === "tool") {
+		return (
+			<Box flexDirection="column" marginBottom={1}>
+				<Text color={toolStatusColor(line.status, theme)}>
+					{toolStatusMark(line.status)} {line.name} <Text color={theme.muted}>{line.preview}</Text>
+				</Text>
+				{line.error ? <Text color={theme.danger}>{line.error}</Text> : null}
+			</Box>
+		);
+	}
+	if (line.type === "todos") {
+		return (
+			<Box marginBottom={1}>
+				<Text color={theme.muted}>todos {line.text}</Text>
+			</Box>
+		);
+	}
+	if (line.type === "error") {
+		return (
+			<Box marginBottom={1}>
+				<Text color={theme.danger}>{line.text}</Text>
+			</Box>
+		);
+	}
+	return (
+		<Box marginBottom={1}>
+			<Text color={theme.muted}>{line.text}</Text>
+		</Box>
+	);
+}
+
+function StreamView(props: Readonly<{ theme: Theme; lines: StreamLine[] }>): React.ReactElement {
 	return (
 		<Box flexDirection="column">
-			{props.lines.map((line) => {
-				if (line.type === "user") {
-					return (
-						<Box key={line.key} marginBottom={1}>
-							<Text color={props.theme.brand}>› </Text>
-							<Text color={props.theme.ink}>{line.text}</Text>
-						</Box>
-					);
-				}
-				if (line.type === "assistant") {
-					return (
-						<Box key={line.key} marginBottom={1}>
-							<Text color={props.theme.ink}>{plainTerminalText(line.text)}</Text>
-						</Box>
-					);
-				}
-				if (line.type === "tool") {
-					const mark = line.status === "running" ? "…" : line.status === "ok" ? "✓" : "×";
-					const color =
-						line.status === "running"
-							? props.theme.action
-							: line.status === "ok"
-								? props.theme.done
-								: props.theme.danger;
-					return (
-						<Box key={line.key} flexDirection="column" marginBottom={1}>
-							<Text color={color}>
-								{mark} {line.name} <Text color={props.theme.muted}>{line.preview}</Text>
-							</Text>
-							{line.error ? <Text color={props.theme.danger}>{line.error}</Text> : null}
-						</Box>
-					);
-				}
-				if (line.type === "todos") {
-					return (
-						<Box key={line.key} marginBottom={1}>
-							<Text color={props.theme.muted}>todos {line.text}</Text>
-						</Box>
-					);
-				}
-				if (line.type === "error") {
-					return (
-						<Box key={line.key} marginBottom={1}>
-							<Text color={props.theme.danger}>{line.text}</Text>
-						</Box>
-					);
-				}
+			{props.lines.map((line) => (
+				<Box key={line.key}>
+					<StreamLineView theme={props.theme} line={line} />
+				</Box>
+			))}
+		</Box>
+	);
+}
+
+function pickerRowText(item: PickerItem, active: boolean): string {
+	const mark = active ? "› " : "  ";
+	const hint = item.hint ? ` · ${item.hint}` : "";
+	return `${mark}${item.label}${hint}`;
+}
+
+function PickerMenu(
+	props: Readonly<{ theme: Theme; picker: PickerState; width: number; pageSize: number }>,
+): React.ReactElement {
+	const page = pickerPage(props.picker.items, props.picker.index, props.pageSize);
+	const width = Math.max(1, props.width);
+	return (
+		<Box flexDirection="column" flexGrow={1} marginY={1} width={width} overflow="hidden">
+			<Box width={width} height={1} overflow="hidden">
+				<Text color={props.theme.muted} wrap="truncate">
+					{paintPickerLine(props.picker.title, width)}
+				</Text>
+			</Box>
+			{page.items.map((item, index) => {
+				const active = page.offset + index === props.picker.index;
 				return (
-					<Box key={line.key} marginBottom={1}>
-						<Text color={props.theme.muted}>{line.text}</Text>
+					<Box key={item.id} width={width} height={1} overflow="hidden">
+						<Text color={active ? props.theme.brand : undefined} bold={active} wrap="truncate">
+							{paintPickerLine(pickerRowText(item, active), width)}
+						</Text>
 					</Box>
 				);
 			})}
+			<Box width={width} height={1} overflow="hidden">
+				<Text color={props.theme.line} wrap="truncate">
+					{paintPickerLine("tab or arrows · enter to choose · esc to cancel", width)}
+				</Text>
+			</Box>
 		</Box>
 	);
 }
 
-function PickerMenu(props: { theme: Theme; picker: PickerState }): React.ReactElement {
-	return (
-		<Box flexDirection="column" marginY={1}>
-			<Text color={props.theme.muted}>{props.picker.title}</Text>
-			{props.picker.items.map((item, index) => {
-				const active = index === props.picker.index;
-				return (
-					<Text key={item.id}>
-						<Text color={active ? props.theme.brand : props.theme.muted}>
-							{active ? "› " : "  "}
-						</Text>
-						<Text color={active ? props.theme.brand : undefined} bold={active}>
-							{item.label}
-						</Text>
-						{item.hint ? <Text color={props.theme.muted}> · {item.hint}</Text> : null}
-					</Text>
-				);
-			})}
-			<Text color={props.theme.line}>tab or arrows · enter to choose · esc to cancel</Text>
-		</Box>
-	);
-}
-
-function SlashMenu(props: {
-	theme: Theme;
-	items: ReturnType<typeof filterSlashCommands>;
-	selected: number;
-}): React.ReactElement {
+function SlashMenu(
+	props: Readonly<{
+		theme: Theme;
+		items: ReturnType<typeof filterSlashCommands>;
+		selected: number;
+	}>,
+): React.ReactElement {
 	if (props.items.length === 0) {
 		return <Text color={props.theme.muted}>No matching command</Text>;
 	}
@@ -327,23 +374,21 @@ function SlashMenu(props: {
 		<Box flexDirection="column" marginTop={1}>
 			{props.items.map((item, index) => {
 				const active = index === props.selected;
+				const mark = active ? "› " : "  ";
 				return (
-					<Text key={item.name}>
-						<Text color={active ? props.theme.brand : props.theme.muted}>
-							{active ? "› " : "  "}
+					<Box key={item.name} height={1} overflow="hidden">
+						<Text color={active ? props.theme.brand : undefined} bold={active} wrap="truncate">
+							{mark}
+							{formatSlashCommand(item)} · {item.hint}
 						</Text>
-						<Text color={active ? props.theme.brand : undefined} bold={active}>
-							{formatSlashCommand(item)}
-						</Text>
-						<Text color={props.theme.muted}> · {item.hint}</Text>
-					</Text>
+					</Box>
 				);
 			})}
 		</Box>
 	);
 }
 
-function ApprovalCard(props: { theme: Theme; req: ApprovalRequest }): React.ReactElement {
+function ApprovalCard(props: Readonly<{ theme: Theme; req: ApprovalRequest }>): React.ReactElement {
 	const command =
 		typeof props.req.input.command === "string"
 			? props.req.input.command
@@ -363,7 +408,135 @@ function ApprovalCard(props: { theme: Theme; req: ApprovalRequest }): React.Reac
 	);
 }
 
-function App(props: { harness: HarnessRuntime }): React.ReactElement {
+function pickerSelectedValue(picker: SlashPickerKind, harness: HarnessRuntime): string | undefined {
+	if (picker === "model") return harness.modelId;
+	if (picker === "mode") return harness.mode;
+	const prefs = readMediaPrefs();
+	if (picker === "image") return prefs.imageModel;
+	if (picker === "video") return prefs.videoModel;
+	if (picker === "transcribe") return prefs.transcribeModel;
+	return undefined;
+}
+
+function approvalDecision(input: string, escaped: boolean): "yes" | "no" | "always" | undefined {
+	if (input === "y" || input === "Y") return "yes";
+	if (input === "a" || input === "A") return "always";
+	if (input === "n" || input === "N" || escaped) return "no";
+	return undefined;
+}
+
+function slashMenuNav(
+	key: { upArrow: boolean; downArrow: boolean; tab: boolean },
+	slashOpen: boolean,
+	count: number,
+): "up" | "down" | "tab" | undefined {
+	if (!slashOpen || count === 0) return undefined;
+	if (key.upArrow) return "up";
+	if (key.downArrow) return "down";
+	if (key.tab) return "tab";
+	return undefined;
+}
+
+function applyPickerKeys(
+	picker: PickerState,
+	key: {
+		escape: boolean;
+		upArrow: boolean;
+		downArrow: boolean;
+		tab: boolean;
+		shift: boolean;
+		return: boolean;
+	},
+	setPicker: (
+		value: PickerState | null | ((current: PickerState | null) => PickerState | null),
+	) => void,
+	setStatus: (status: UiStatus) => void,
+	setValue: (value: string) => void,
+	onEnter: (picker: PickerState) => void,
+): void {
+	const nav = inkPickerNav(key);
+	if (nav === "esc") {
+		const next = draftAfterPicker(picker.kind);
+		setPicker(null);
+		setStatus("idle");
+		if (next) setValue(next);
+		return;
+	}
+	if (nav === "enter") {
+		onEnter(picker);
+		return;
+	}
+	if (typeof nav === "number") {
+		setPicker((current) =>
+			current
+				? { ...current, index: stepIndex(current.index, current.items.length, nav) }
+				: current,
+		);
+	}
+}
+
+function trySlashMenuInput(
+	key: { upArrow: boolean; downArrow: boolean; tab: boolean },
+	slashOpen: boolean,
+	slashItems: ReturnType<typeof filterSlashCommands>,
+	slashIndex: number,
+	setSlashIndex: (fn: (index: number) => number) => void,
+	setValue: (value: string) => void,
+): void {
+	const slashKey = slashMenuNav(key, slashOpen, slashItems.length);
+	if (slashKey === "up") {
+		setSlashIndex((index) => stepIndex(index, slashItems.length, -1));
+		return;
+	}
+	if (slashKey === "down") {
+		setSlashIndex((index) => stepIndex(index, slashItems.length, 1));
+		return;
+	}
+	if (slashKey === "tab") {
+		const selected = slashItems[slashIndex] ?? slashItems[0];
+		if (selected) setValue(completeSlashCommand(selected));
+	}
+}
+
+function ComposerFooter(
+	props: Readonly<{
+		theme: Theme;
+		status: UiStatus;
+		statusLabel: string;
+		value: string;
+		onChange: (value: string) => void;
+		onSubmit: (value: string) => void;
+		slashOpen: boolean;
+		slashItems: ReturnType<typeof filterSlashCommands>;
+		slashIndex: number;
+		mediaLine: string;
+		pickerOpen: boolean;
+	}>,
+): React.ReactElement | null {
+	if (props.pickerOpen || props.status === "picker") return null;
+	if (props.status !== "idle") {
+		return <Text color={props.theme.muted}>{props.statusLabel}</Text>;
+	}
+	return (
+		<Box flexDirection="column">
+			<Box>
+				<Text color={props.theme.brand}>› </Text>
+				<TextInput value={props.value} onChange={props.onChange} onSubmit={props.onSubmit} />
+			</Box>
+			{props.slashOpen ? (
+				<SlashMenu
+					theme={props.theme}
+					items={props.slashItems}
+					selected={Math.min(props.slashIndex, Math.max(props.slashItems.length - 1, 0))}
+				/>
+			) : (
+				<Text color={props.theme.line}>{props.mediaLine}</Text>
+			)}
+		</Box>
+	);
+}
+
+function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 	const { harness } = props;
 	const theme = harness.theme;
 	const { exit } = useApp();
@@ -384,6 +557,15 @@ function App(props: { harness: HarnessRuntime }): React.ReactElement {
 		resolve: (ok: boolean) => void;
 	} | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
+	const pickerRef = useRef(picker);
+	pickerRef.current = picker;
+	const pickerEscTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	useEffect(() => {
+		return () => {
+			if (pickerEscTimer.current) clearTimeout(pickerEscTimer.current);
+		};
+	}, []);
 
 	const slashItems = useMemo(() => filterSlashCommands(value), [value]);
 	const slashOpen = status === "idle" && !picker && value.startsWith("/");
@@ -445,8 +627,8 @@ function App(props: { harness: HarnessRuntime }): React.ReactElement {
 			const item = state.items[state.index];
 			if (!item) return;
 			setPicker(null);
-			setStatus("idle");
 			if (state.kind === "resume") {
+				setStatus("idle");
 				void harness.store.get(item.id).then((session) => {
 					if (!session) {
 						pushSystem(`No session ${item.label}`);
@@ -456,84 +638,78 @@ function App(props: { harness: HarnessRuntime }): React.ReactElement {
 				});
 				return;
 			}
-			const result = applyPickerChoice(harness, state.kind, item.id);
-			if (result.kind === "text") {
-				pushSystem(result.text);
-			}
-			setModel(harness.modelId);
-			setMode(harness.mode);
-			refreshMedia();
-			const nextDraft = draftAfterPicker(state.kind);
-			if (nextDraft) setValue(nextDraft);
+			if (state.kind === "integration") setStatus("running");
+			else setStatus("idle");
+			void applyPickerChoice(harness, state.kind, item.id)
+				.then((result) => {
+					if (result.kind === "text") {
+						pushSystem(result.text);
+					}
+					setModel(harness.modelId);
+					setMode(harness.mode);
+					refreshMedia();
+					const nextDraft = draftAfterPicker(state.kind);
+					if (nextDraft) setValue(nextDraft);
+				})
+				.catch((err: unknown) => {
+					pushSystem(errorMessage(err));
+				})
+				.finally(() => {
+					setStatus("idle");
+				});
 		},
 		[applySession, harness, pushSystem, refreshMedia],
 	);
 
-	useInput((input, key) => {
-		if (status === "approval" && pending) {
-			if (input === "y" || input === "Y") {
-				pending.resolve(true);
+	useInput(
+		(input, key) => {
+			if (status === "approval" && pending) {
+				const decision = approvalDecision(input, key.escape);
+				if (!decision) return;
+				if (decision === "always") harness.allowRiskyAlways(pending.req.toolName);
+				pending.resolve(decision !== "no");
 				setPending(null);
 				setStatus("running");
-			} else if (input === "n" || input === "N") {
-				pending.resolve(false);
-				setPending(null);
-				setStatus("running");
-			} else if (input === "a" || input === "A") {
-				harness.allowRiskyAlways(pending.req.toolName);
-				pending.resolve(true);
-				setPending(null);
-				setStatus("running");
-			} else if (key.escape) {
-				pending.resolve(false);
-				setPending(null);
-				setStatus("running");
-			}
-			return;
-		}
-		if (picker) {
-			if (key.escape) {
-				const next = draftAfterPicker(picker.kind);
-				setPicker(null);
-				setStatus("idle");
-				if (next) setValue(next);
 				return;
 			}
-			if (key.upArrow || (key.tab && key.shift)) {
-				setPicker((current) =>
-					current
-						? { ...current, index: stepIndex(current.index, current.items.length, -1) }
-						: current,
-				);
+			const open = pickerRef.current;
+			if (open) {
+				const nav = inkPickerNav(key);
+				if (nav === "esc") {
+					if (pickerEscTimer.current) clearTimeout(pickerEscTimer.current);
+					pickerEscTimer.current = setTimeout(() => {
+						pickerEscTimer.current = null;
+						const still = pickerRef.current;
+						if (!still) return;
+						applyPickerKeys(
+							still,
+							{
+								escape: true,
+								upArrow: false,
+								downArrow: false,
+								tab: false,
+								shift: false,
+								return: false,
+							},
+							setPicker,
+							setStatus,
+							setValue,
+							confirmPicker,
+						);
+					}, 40);
+					return;
+				}
+				if (pickerEscTimer.current) {
+					clearTimeout(pickerEscTimer.current);
+					pickerEscTimer.current = null;
+				}
+				applyPickerKeys(open, key, setPicker, setStatus, setValue, confirmPicker);
 				return;
 			}
-			if (key.downArrow || key.tab) {
-				setPicker((current) =>
-					current
-						? { ...current, index: stepIndex(current.index, current.items.length, 1) }
-						: current,
-				);
-				return;
-			}
-			if (key.return) {
-				confirmPicker(picker);
-			}
-			return;
-		}
-		if (status !== "idle" || !slashOpen || slashItems.length === 0) return;
-		if (key.upArrow) {
-			setSlashIndex((index) => stepIndex(index, slashItems.length, -1));
-			return;
-		}
-		if (key.downArrow) {
-			setSlashIndex((index) => stepIndex(index, slashItems.length, 1));
-			return;
-		}
-		if (key.tab) {
-			const selected = slashItems[slashIndex] ?? slashItems[0];
-			if (selected) setValue(completeSlashCommand(selected));
-		}
-	});
+			trySlashMenuInput(key, slashOpen, slashItems, slashIndex, setSlashIndex, setValue);
+		},
+		{ isActive: true },
+	);
 
 	const handleSlash = useCallback(
 		async (raw: string) => {
@@ -575,32 +751,20 @@ function App(props: { harness: HarnessRuntime }): React.ReactElement {
 					pushSystem(outcome.caption);
 					return;
 				}
-				const prefs = readMediaPrefs();
-				const currentId =
-					outcome.picker === "model"
-						? harness.modelId
-						: outcome.picker === "mode"
-							? harness.mode
-							: outcome.picker === "image"
-								? prefs.imageModel
-								: outcome.picker === "video"
-									? prefs.videoModel
-									: outcome.picker === "transcribe"
-										? prefs.transcribeModel
-										: undefined;
+				const currentId = pickerSelectedValue(outcome.picker, harness);
 				const selected = currentId
 					? Math.max(
 							0,
 							outcome.items.findIndex((item) => item.id === currentId),
 						)
 					: 0;
+				setStatus("picker");
 				setPicker({
 					title: outcome.title,
 					kind: outcome.picker,
 					items: outcome.items,
 					index: selected,
 				});
-				setStatus("picker");
 			} finally {
 				setStatus((current) => (current === "picker" ? current : "idle"));
 			}
@@ -612,7 +776,8 @@ function App(props: { harness: HarnessRuntime }): React.ReactElement {
 		async (text: string) => {
 			const trimmed = text.trim();
 			if (!trimmed || status !== "idle") return;
-			const slash = resolveSlashSubmit(trimmed);
+			const selected = slashOpen ? slashItems[slashIndex] : undefined;
+			const slash = resolveSlashSubmit(trimmed, selected);
 			if (slash?.action === "hold") return;
 			if (slash?.action === "complete") {
 				setValue(slash.line);
@@ -650,7 +815,7 @@ function App(props: { harness: HarnessRuntime }): React.ReactElement {
 				setStatus("idle");
 			}
 		},
-		[handleSlash, harness, status],
+		[handleSlash, harness, slashIndex, slashItems, slashOpen, status],
 	);
 
 	const statusLabel = useMemo(() => {
@@ -673,7 +838,6 @@ function App(props: { harness: HarnessRuntime }): React.ReactElement {
 		<Box flexDirection="column" width={mainWidth} height={rows}>
 			<Header
 				theme={theme}
-				name={harness.config.name}
 				model={model}
 				cwd={harness.cwd}
 				title={title}
@@ -681,30 +845,34 @@ function App(props: { harness: HarnessRuntime }): React.ReactElement {
 				mode={mode}
 				spend={spend ? formatUsage(spend) : undefined}
 			/>
-			<Box flexDirection="column" flexGrow={1} overflow="hidden">
-				<StreamView theme={theme} lines={shown} />
-			</Box>
-			{pending ? <ApprovalCard theme={theme} req={pending.req} /> : null}
-			{picker ? <PickerMenu theme={theme} picker={picker} /> : null}
-			{status === "idle" ? (
-				<Box flexDirection="column">
-					<Box>
-						<Text color={theme.brand}>› </Text>
-						<TextInput value={value} onChange={setValue} onSubmit={submit} />
-					</Box>
-					{slashOpen ? (
-						<SlashMenu
-							theme={theme}
-							items={slashItems}
-							selected={Math.min(slashIndex, Math.max(slashItems.length - 1, 0))}
-						/>
-					) : (
-						<Text color={theme.line}>{mediaLine}</Text>
-					)}
+			{picker ? (
+				<Box flexGrow={1} overflow="hidden" width={mainWidth}>
+					<PickerMenu
+						theme={theme}
+						picker={picker}
+						width={mainWidth}
+						pageSize={pickerVisibleRows(rows)}
+					/>
 				</Box>
-			) : status === "picker" ? null : (
-				<Text color={theme.muted}>{statusLabel}</Text>
+			) : (
+				<Box flexDirection="column" flexGrow={1} overflow="hidden">
+					<StreamView theme={theme} lines={shown} />
+				</Box>
 			)}
+			{pending ? <ApprovalCard theme={theme} req={pending.req} /> : null}
+			<ComposerFooter
+				theme={theme}
+				status={status}
+				statusLabel={statusLabel}
+				value={value}
+				onChange={setValue}
+				onSubmit={submit}
+				slashOpen={slashOpen}
+				slashItems={slashItems}
+				slashIndex={slashIndex}
+				mediaLine={mediaLine}
+				pickerOpen={Boolean(picker)}
+			/>
 		</Box>
 	);
 
