@@ -187,6 +187,10 @@ If you only need types or tracing, `HarnessConfig` / `loadConfig` and the observ
 | `initHost` | Add `.harness/` to `.gitignore`. `examples: true` writes a host scaffold |
 | `@useavalon/caelence-agent/observability` | Langfuse, gates, `runLocalExperiment` |
 
+## Contributing
+
+Bugs and feature ideas go through GitHub issues. Code from outside the org comes in as a fork and a pull request against `main`. The maintainer reviews before merge. See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports use a [private advisory](https://github.com/useAvalon/caelence-agent/security/advisories/new), not a public issue.
+
 ## License
 
 [MIT](LICENSE)

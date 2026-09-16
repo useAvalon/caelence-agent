@@ -1,0 +1,57 @@
+name: Bug report
+description: Something is broken or behaves wrongly.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security issues belong in a [private advisory](https://github.com/useAvalon/caelence-agent/security/advisories/new), not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Commands, clicks, or a short script. Strip API keys and session logs.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: npm version, git SHA, or `caelence` output if you have it.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Desktop
+        - Terminal UI
+        - `caelence chat`
+        - Library
+        - Install / publish
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 15, Windows 11, Ubuntu 24.04
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra context
+      description: Logs are useful if you paste them. Leave out `OPENROUTER_API_KEY`, tokens, and `.harness` session files.
