@@ -8,10 +8,65 @@ export interface ToolResult {
 	structuredContent?: Record<string, unknown>;
 }
 
+export interface McpToolAnnotations {
+	readOnlyHint: boolean;
+	destructiveHint: boolean;
+	idempotentHint: boolean;
+	openWorldHint: boolean;
+}
+
+export const READ_ONLY_ANNOTATIONS: McpToolAnnotations = {
+	readOnlyHint: true,
+	destructiveHint: false,
+	idempotentHint: true,
+	openWorldHint: false,
+};
+
+export const UNKNOWN_TOOL_ANNOTATIONS: McpToolAnnotations = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: false,
+	openWorldHint: true,
+};
+
+export function resolveToolAnnotations(raw: unknown): McpToolAnnotations {
+	if (!raw || typeof raw !== "object") return UNKNOWN_TOOL_ANNOTATIONS;
+	const rec = raw as Record<string, unknown>;
+	if (
+		typeof rec.readOnlyHint !== "boolean" ||
+		typeof rec.destructiveHint !== "boolean" ||
+		typeof rec.idempotentHint !== "boolean" ||
+		typeof rec.openWorldHint !== "boolean"
+	) {
+		return UNKNOWN_TOOL_ANNOTATIONS;
+	}
+	return {
+		readOnlyHint: rec.readOnlyHint,
+		destructiveHint: rec.destructiveHint,
+		idempotentHint: rec.idempotentHint,
+		openWorldHint: rec.openWorldHint,
+	};
+}
+
+export function mcpToolListItem(tool: McpToolDefinition): {
+	name: string;
+	description: string;
+	inputSchema: Record<string, unknown>;
+	annotations: McpToolAnnotations;
+} {
+	return {
+		name: tool.name,
+		description: tool.description,
+		inputSchema: tool.inputSchema,
+		annotations: tool.annotations,
+	};
+}
+
 export interface McpToolDefinition {
 	name: string;
 	description: string;
 	inputSchema: Record<string, unknown>;
+	annotations: McpToolAnnotations;
 	handler(input: Record<string, unknown>): Promise<ToolResult>;
 }
 
@@ -167,11 +222,7 @@ async function dispatch(
 			return {};
 		case "tools/list":
 			return {
-				tools: server.listTools().map((t) => ({
-					name: t.name,
-					description: t.description,
-					inputSchema: t.inputSchema,
-				})),
+				tools: server.listTools().map(mcpToolListItem),
 			};
 		case "tools/call": {
 			const params = req.params ?? {};

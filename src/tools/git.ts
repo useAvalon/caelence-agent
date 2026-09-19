@@ -1,4 +1,10 @@
-import { errorResult, jsonResult, type McpToolDefinition, textResult } from "../core/mcp.ts";
+import {
+	errorResult,
+	jsonResult,
+	type McpToolDefinition,
+	READ_ONLY_ANNOTATIONS,
+	textResult,
+} from "../core/mcp.ts";
 import { resolveUnderCwd } from "./paths.ts";
 
 const GIT_TIMEOUT_MS = 30_000;
@@ -35,6 +41,7 @@ export function createGitTools(cwd: string): McpToolDefinition[] {
 		{
 			name: "git_status",
 			description: "Show branch and porcelain status. Prefer this over exec git status.",
+			annotations: READ_ONLY_ANNOTATIONS,
 			inputSchema: { type: "object", properties: {} },
 			async handler() {
 				const result = await git(cwd, ["status", "--porcelain=v1", "-b"]);
@@ -45,6 +52,7 @@ export function createGitTools(cwd: string): McpToolDefinition[] {
 		{
 			name: "git_diff",
 			description: "Show the working tree or staged diff. Optional project-relative path.",
+			annotations: READ_ONLY_ANNOTATIONS,
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -71,6 +79,7 @@ export function createGitTools(cwd: string): McpToolDefinition[] {
 		{
 			name: "git_log",
 			description: "Recent commits, oneline. Default 20.",
+			annotations: READ_ONLY_ANNOTATIONS,
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -91,6 +100,12 @@ export function createGitTools(cwd: string): McpToolDefinition[] {
 			name: "git_commit",
 			description:
 				"Commit already-staged files, or the listed project-relative paths. Does not push. Requires approval.",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: false,
+				openWorldHint: false,
+			},
 			inputSchema: {
 				type: "object",
 				properties: {

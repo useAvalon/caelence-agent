@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { errorResult, type McpToolDefinition, textResult } from "../core/mcp.ts";
+import {
+	errorResult,
+	type McpToolDefinition,
+	READ_ONLY_ANNOTATIONS,
+	textResult,
+} from "../core/mcp.ts";
 import type { Skill } from "../skills/loader.ts";
 import { catalogRefsMatch, skillNameFromCatalogId } from "../skills/registry.ts";
 import { PathEscapeError, resolveUnderCwd } from "./paths.ts";
@@ -34,6 +39,7 @@ export function createReadSkillTool(skills: Skill[]): McpToolDefinition {
 		name: "read_skill",
 		description:
 			"Read a loaded skill by name or catalog id (user or project). Optional `file` reads a reference next to that skill (e.g. references/anti-slop.md). Prefer this over guessing skill contents.",
+		annotations: READ_ONLY_ANNOTATIONS,
 		inputSchema: {
 			type: "object",
 			properties: {

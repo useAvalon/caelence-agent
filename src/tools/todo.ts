@@ -34,6 +34,12 @@ export function createTodoTool(store: TodoStore): McpToolDefinition {
 		name: "todo_write",
 		description:
 			"Replace the session todo list. Use for multi-step work. One in_progress item at a time.",
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
 		inputSchema: {
 			type: "object",
 			properties: {

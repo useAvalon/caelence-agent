@@ -35,8 +35,13 @@ export {
 	errorResult,
 	jsonResult,
 	type McpServer,
+	type McpToolAnnotations,
 	type McpToolDefinition,
+	mcpToolListItem,
+	READ_ONLY_ANNOTATIONS,
+	resolveToolAnnotations,
 	textResult,
+	UNKNOWN_TOOL_ANNOTATIONS,
 } from "./core/mcp.ts";
 export {
 	type AgentMode,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { McpToolDefinition } from "./mcp.ts";
+import { type McpToolDefinition, UNKNOWN_TOOL_ANNOTATIONS } from "./mcp.ts";
 import {
 	filterToolsForMode,
 	parseAgentMode,
@@ -12,6 +12,7 @@ function stub(name: string): McpToolDefinition {
 		name,
 		description: name,
 		inputSchema: { type: "object", properties: {} },
+		annotations: UNKNOWN_TOOL_ANNOTATIONS,
 		async handler() {
 			return { content: [{ type: "text", text: name }] };
 		},

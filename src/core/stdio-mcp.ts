@@ -3,6 +3,7 @@ import {
 	errorResult,
 	jsonResult,
 	type McpToolDefinition,
+	resolveToolAnnotations,
 	type ToolResult,
 	textResult,
 } from "./mcp.ts";
@@ -19,6 +20,7 @@ export interface StdioMcpClientOptions {
 	args?: string[];
 	env?: Record<string, string>;
 	cwd?: string;
+	namePrefix?: string;
 }
 
 /**
@@ -47,6 +49,10 @@ export async function loadStdioMcpTools(
 		pending.clear();
 	};
 
+	void Promise.resolve(proc.exited).then(() => {
+		if (!closed) failAll(new Error("MCP process closed"));
+	});
+
 	const onLine = (line: string): void => {
 		const trimmed = line.trim();
 		if (!trimmed) return;
@@ -72,7 +78,10 @@ export async function loadStdioMcpTools(
 			try {
 				while (true) {
 					const { done, value } = await reader.read();
-					if (done) break;
+					if (done) {
+						failAll(new Error("MCP process closed"));
+						break;
+					}
 					buffer += decoder.decode(value, { stream: true });
 					let idx = buffer.indexOf("\n");
 					while (idx >= 0) {
@@ -109,23 +118,56 @@ export async function loadStdioMcpTools(
 		}
 	};
 
-	await rpc("initialize", {
-		protocolVersion: "2024-11-05",
-		capabilities: {},
-		clientInfo: { name: "caelence-harness", version: "0.1.0" },
-	});
-	await rpc("notifications/initialized").catch(() => undefined);
-
-	const listed = (await rpc("tools/list")) as {
-		tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
+	const initMs = 12_000;
+	let listed: {
+		tools?: Array<{
+			name: string;
+			description?: string;
+			inputSchema?: Record<string, unknown>;
+			annotations?: unknown;
+		}>;
 	};
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		listed = (await Promise.race([
+			(async () => {
+				await rpc("initialize", {
+					protocolVersion: "2024-11-05",
+					capabilities: {},
+					clientInfo: { name: "caelence-harness", version: "0.1.0" },
+				});
+				await rpc("notifications/initialized").catch(() => undefined);
+				return rpc("tools/list");
+			})(),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					close();
+					reject(new Error("MCP initialize timed out"));
+				}, initMs);
+			}),
+		])) as {
+			tools?: Array<{
+				name: string;
+				description?: string;
+				inputSchema?: Record<string, unknown>;
+				annotations?: unknown;
+			}>;
+		};
+	} catch (err) {
+		close();
+		throw err;
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
 	const remote = listed.tools ?? [];
-	const prefix = options.command.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "mcp";
+	const rawPrefix = options.namePrefix?.trim() || options.command;
+	const prefix = rawPrefix.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "mcp";
 
 	const tools: McpToolDefinition[] = remote.map((t) => ({
 		name: `${prefix}__${t.name}`,
 		description: t.description ?? t.name,
 		inputSchema: t.inputSchema ?? { type: "object", properties: {} },
+		annotations: resolveToolAnnotations(t.annotations),
 		async handler(input) {
 			try {
 				const result = (await rpc("tools/call", { name: t.name, arguments: input })) as ToolResult;
