@@ -78,7 +78,7 @@ jobs:
             echo "::notice::Bump: $OVERRIDE (manual override)"
             exit 0
           fi
-          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
           if [ -z "$LAST_TAG" ]; then
             RANGE=""
             echo "::notice::No previous tag; scanning all commits."
@@ -111,13 +111,25 @@ jobs:
           else
             NEW=$(npm version "pre${BUMP}" --preid="$CHANNEL" --no-git-tag-version)
           fi
-          echo "version=${NEW#v}" >> "$GITHUB_OUTPUT"
+          VERSION="${NEW#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "::notice::New version: ${NEW}"
+          NAME=$(node -p "require('./package.json').name")
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${NAME}@${VERSION} is already on npm; skip publish."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Publish to npm
         run: |
           TAG="${{ inputs.channel }}"
           [ "$TAG" = "stable" ] && TAG="latest"
+          if [ "${{ steps.version.outputs.already_published }}" = "true" ]; then
+            echo "Skip publish: ${{ steps.version.outputs.version }} is already on npm."
+            exit 0
+          fi
           if [ "${{ inputs.dry-run }}" = "true" ]; then
             echo "[DRY RUN] npm publish --tag $TAG"
             npm publish --dry-run --tag "$TAG"
@@ -133,13 +145,25 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           TAG="v${VERSION}"
           BRANCH="release/v${VERSION}"
-          git checkout -b "$BRANCH"
+          git checkout -B "$BRANCH"
           git add package.json bun.lock 2>/dev/null || git add package.json
-          git commit -m "release: v${VERSION}"
+          if git diff --cached --quiet; then
+            echo "Version commit already on ${BRANCH}."
+          else
+            git commit -m "release: v${VERSION}"
+          fi
           git push -u origin "$BRANCH"
-          git tag "$TAG"
-          git push origin "$TAG"
-          gh pr create --base main --head "$BRANCH" --title "release: v${VERSION}" --body "Version bump from the release workflow. npm already published this version."
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists."
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+          if ! gh pr list --head "$BRANCH" --base main --json number --jq '.[0].number' | grep -q '[0-9]'; then
+            gh pr create --base main --head "$BRANCH" --title "release: v${VERSION}" --body "Version bump from the release workflow. npm already published this version."
+          fi
           PRERELEASE=""
           [ "${{ inputs.channel }}" != "stable" ] && PRERELEASE="--prerelease"
-          gh release create "$TAG" --title "v${VERSION}" --generate-notes $PRERELEASE
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "v${VERSION}" --generate-notes $PRERELEASE
+          fi
