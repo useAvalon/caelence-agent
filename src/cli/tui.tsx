@@ -1,5 +1,4 @@
 import { Box, render, Text, useApp, useInput, useStdout } from "ink";
-import TextInput from "ink-text-input";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveOpenRouter } from "../config.ts";
@@ -41,6 +40,7 @@ import {
 	visibleTranscriptCount,
 } from "./tui-layout.ts";
 import { enterAltScreen } from "./tui-screen.ts";
+import { TuiTextInput } from "./tui-text-input.tsx";
 
 type ToolStatus = "running" | "ok" | "fail";
 
@@ -521,7 +521,7 @@ function ComposerFooter(
 		<Box flexDirection="column">
 			<Box>
 				<Text color={props.theme.brand}>› </Text>
-				<TextInput value={props.value} onChange={props.onChange} onSubmit={props.onSubmit} />
+				<TuiTextInput value={props.value} onChange={props.onChange} onSubmit={props.onSubmit} />
 			</Box>
 			{props.slashOpen ? (
 				<SlashMenu
