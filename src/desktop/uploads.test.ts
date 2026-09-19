@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	composeUploadMessage,
+	deleteUploads,
 	isTextUpload,
 	listUploads,
 	matchUploadEdit,
@@ -58,6 +59,11 @@ describe("uploads", () => {
 			expect(composeUploadMessage("look", saved)).toContain("```\nhello\n```");
 			expect(composeUploadMessage("", saved)).toContain(saved[1]?.rel ?? "");
 			expect(listUploads(cwd).map((item) => item.name)).toEqual(["shot.png", "note.txt"]);
+			const noteRel = saved[0]?.rel ?? "";
+			expect(deleteUploads(cwd, [noteRel, "../secret"]).map((item) => item.name)).toEqual([
+				"shot.png",
+			]);
+			expect(listUploads(cwd).map((item) => item.name)).toEqual(["shot.png"]);
 		} finally {
 			await rm(cwd, { recursive: true, force: true });
 		}

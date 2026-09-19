@@ -1,5 +1,5 @@
-import { joinUploadDisplay, parseUploadDisplay } from "../../src/desktop/upload-message.ts";
-import { type AttachmentPreview, attachmentKind } from "./composer-files.ts";
+import { joinUploadDisplay, parseUploadDisplay } from "../../src/desktop/upload-message";
+import { type AttachmentPreview, attachmentKind } from "./composer-files";
 
 export function userBubbleContent(
 	text: string,

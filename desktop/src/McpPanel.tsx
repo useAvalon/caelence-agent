@@ -2,6 +2,7 @@ import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { type ReactElement, useEffect, useState } from "react";
 import { errorMessage } from "../../src/core/errors";
 import { addMcp, type BridgeClient, getMcps, type PublicUserMcp, removeMcp } from "./api";
+import type { ShowNotice } from "./desk-types";
 
 const LOCAL_MCP_PLACEHOLDER = `uvx mcp-server-fetch
 or ------------------------
@@ -86,7 +87,7 @@ function McpRow(
 export function McpPanel(
 	props: Readonly<{
 		bridge: BridgeClient;
-		onNotice: (text: string) => void;
+		onNotice: ShowNotice;
 	}>,
 ): ReactElement {
 	const [items, setItems] = useState<PublicUserMcp[] | null>(null);
@@ -108,7 +109,7 @@ export function McpPanel(
 			.catch((err: unknown) => {
 				if (!alive) return;
 				setLoadFailed(true);
-				props.onNotice(errorMessage(err));
+				props.onNotice(errorMessage(err), "error");
 			});
 		return () => {
 			alive = false;
@@ -129,8 +130,9 @@ export function McpPanel(
 			setCommand("");
 			setUrl("");
 			setToken("");
+			props.onNotice("Added");
 		} catch (err) {
-			props.onNotice(errorMessage(err));
+			props.onNotice(errorMessage(err), "error");
 		} finally {
 			setBusy(false);
 		}
@@ -141,8 +143,9 @@ export function McpPanel(
 		try {
 			const result = await removeMcp(props.bridge, id);
 			setItems(result.items);
+			props.onNotice("Removed");
 		} catch (err) {
-			props.onNotice(errorMessage(err));
+			props.onNotice(errorMessage(err), "error");
 		} finally {
 			setPendingId(null);
 		}
@@ -161,10 +164,7 @@ export function McpPanel(
 
 	return (
 		<>
-			<p className="desk-integrations-lead">
-				Local command or URL MCP servers for this project. Paste a command, or an mcpServers JSON
-				block.
-			</p>
+			<p className="desk-integrations-lead">Add a server the agent can call.</p>
 			<div className="desk-pane-tabs desk-pane-tabs--compact" role="tablist" aria-label="MCP kind">
 				<button
 					type="button"

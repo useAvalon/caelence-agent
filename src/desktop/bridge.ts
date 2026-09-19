@@ -58,7 +58,13 @@ import { openResolvedPath, resolveLocalPath } from "./open-local.ts";
 import { readPreviewCache, writePreviewCache } from "./preview-cache.ts";
 import { filePreviewKind, filePreviewMime } from "./preview-kind.ts";
 import { applyStoredOpenRouterKey, maskSecret, writeOpenRouterKey } from "./secrets.ts";
-import { composeUploadMessage, listUploads, parseIncomingUploads, saveUploads } from "./uploads.ts";
+import {
+	composeUploadMessage,
+	deleteUploads,
+	listUploads,
+	parseIncomingUploads,
+	saveUploads,
+} from "./uploads.ts";
 
 export interface DesktopState {
 	name: string;
@@ -267,6 +273,30 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
 	if (!text.trim()) return {};
 	const parsed = JSON.parse(text) as unknown;
 	return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+}
+
+function applyApprovalDecision(req: ApprovalRequest, decision: string): boolean {
+	if (
+		decision === "original" &&
+		typeof req.input.originalPath === "string" &&
+		req.input.originalPath.trim()
+	) {
+		req.input.path = req.input.originalPath;
+	}
+	return (
+		decision === "yes" || decision === "always" || decision === "copy" || decision === "original"
+	);
+}
+
+function waitForApproval(
+	pending: Map<string, (decision: string) => void>,
+	req: ApprovalRequest,
+): Promise<boolean> {
+	return new Promise((resolve) => {
+		pending.set(req.callId, (decision) => {
+			resolve(applyApprovalDecision(req, decision));
+		});
+	});
 }
 
 function snapshot(harness: HarnessRuntime, busy: boolean, title: string): DesktopState {
@@ -701,6 +731,18 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		return json({ ok: true, ...memoryPayload(harness) });
 	};
 
+	const route_post_uploads_delete = async (req: Request, _url: URL): Promise<Response> => {
+		const body = await readJson(req);
+		let rels: string[] = [];
+		if (Array.isArray(body.rels)) {
+			rels = body.rels.filter((item): item is string => typeof item === "string");
+		} else if (typeof body.rel === "string") {
+			rels = [body.rel];
+		}
+		deleteUploads(harness.cwd, rels);
+		return json({ ok: true, state: snapshot(harness, busy, title) });
+	};
+
 	const route_get_slash = async (_req: Request, url: URL): Promise<Response> => {
 		const { filterSlashCommands } = await import("../cli/slash.ts");
 		return json({ items: filterSlashCommands(url.searchParams.get("q") ?? "/") });
@@ -891,24 +933,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 				void harness
 					.runTurn(message, send, {
 						signal: abort?.signal,
-						approvalAsk: (req: ApprovalRequest) =>
-							new Promise<boolean>((resolve) => {
-								pending.set(req.callId, (decision) => {
-									if (
-										decision === "original" &&
-										typeof req.input.originalPath === "string" &&
-										req.input.originalPath.trim()
-									) {
-										req.input.path = req.input.originalPath;
-									}
-									resolve(
-										decision === "yes" ||
-											decision === "always" ||
-											decision === "copy" ||
-											decision === "original",
-									);
-								});
-							}),
+						approvalAsk: (req: ApprovalRequest) => waitForApproval(pending, req),
 						...(editUserTurn !== undefined ? { editUserTurn } : {}),
 					})
 					.catch((err) => {
@@ -968,6 +993,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		"POST /transcribe": route_post_transcribe,
 		"GET /memory": route_get_memory,
 		"POST /memory": route_post_memory,
+		"POST /uploads/delete": route_post_uploads_delete,
 		"POST /settings": route_post_settings,
 		"GET /slash": route_get_slash,
 		"POST /session": route_post_session,

@@ -11,6 +11,7 @@ import {
 	type SkillsPage,
 	searchSkills,
 } from "./api";
+import type { ShowNotice } from "./desk-types";
 import { formatSkillInstalls, omitCatalogSkill, skillMatches } from "./skill-search";
 
 function skillTitle(item: PublicSkill): string {
@@ -37,6 +38,15 @@ function pendingSkillLabel(status: PublicSkill["status"]): string {
 	if (status === "user") return "Removing";
 	if (status === "project") return "Disabling";
 	return "Adding";
+}
+
+function skillChangeNotice(
+	action: "add" | "remove",
+	status: PublicSkill["status"] | undefined,
+): string {
+	if (action === "add") return "Added";
+	if (status === "project") return "Disabled";
+	return "Removed";
 }
 
 function SkillActions(
@@ -147,7 +157,7 @@ function SkillsRemoteBlock(
 		}
 		if (props.remoteVisible.length === 0) return null;
 		return (
-			<>
+			<div className="desk-integration-block">
 				<div className="desk-integration-split">
 					<p>skills.sh</p>
 					<em>Matches for “{props.query.trim()}”.</em>
@@ -158,12 +168,12 @@ function SkillsRemoteBlock(
 					onAdd={props.onAdd}
 					onRemove={props.onRemove}
 				/>
-			</>
+			</div>
 		);
 	}
 	if (props.popular.length === 0) return null;
 	return (
-		<>
+		<div className="desk-integration-block">
 			<div className="desk-integration-split">
 				<p>Popular on skills.sh</p>
 				<em>A short cached list. Type in the search bar to find more.</em>
@@ -174,7 +184,7 @@ function SkillsRemoteBlock(
 				onAdd={props.onAdd}
 				onRemove={props.onRemove}
 			/>
-		</>
+		</div>
 	);
 }
 
@@ -207,7 +217,7 @@ export function SkillsPanel(
 		bridge: BridgeClient;
 		query: string;
 		onQuery: (value: string) => void;
-		onNotice: (text: string) => void;
+		onNotice: ShowNotice;
 	}>,
 ): ReactElement {
 	const [page, setPage] = useState<SkillsPage | null>(null);
@@ -227,7 +237,7 @@ export function SkillsPanel(
 			.catch((err: unknown) => {
 				if (!alive) return;
 				setLoadFailed(true);
-				props.onNotice(errorMessage(err));
+				props.onNotice(errorMessage(err), "error");
 			});
 		void getPopularSkills(props.bridge)
 			.then((result) => {
@@ -257,7 +267,7 @@ export function SkillsPanel(
 				})
 				.catch((err: unknown) => {
 					if (!alive) return;
-					props.onNotice(errorMessage(err));
+					props.onNotice(errorMessage(err), "error");
 				});
 		}, 250);
 		return () => {
@@ -277,12 +287,18 @@ export function SkillsPanel(
 
 	const run = async (id: string, action: "add" | "remove"): Promise<void> => {
 		setPendingId(id);
+		const prior = [
+			...(page?.bundled ?? []),
+			...(page?.popular ?? []),
+			...(page?.loaded ?? []),
+		].find((item) => item.id === id);
 		try {
 			const result =
 				action === "add" ? await addSkill(props.bridge, id) : await removeSkill(props.bridge, id);
 			applyPage(result);
+			props.onNotice(skillChangeNotice(action, prior?.status));
 		} catch (err) {
-			props.onNotice(errorMessage(err));
+			props.onNotice(errorMessage(err), "error");
 			if (action === "add") {
 				setRemote((current) => (current ? omitCatalogSkill(current, id) : current));
 				setPage((current) =>
@@ -357,7 +373,7 @@ export function SkillsPanel(
 			) : (
 				<>
 					{!searching && loaded.length > 0 ? (
-						<>
+						<div className="desk-integration-block">
 							<div className="desk-integration-split">
 								<p>Added</p>
 								<em>Installed for your user. Remove takes them out of ~/.harness/skills.</em>
@@ -368,10 +384,10 @@ export function SkillsPanel(
 								onAdd={(id) => void run(id, "add")}
 								onRemove={(id) => void run(id, "remove")}
 							/>
-						</>
+						</div>
 					) : null}
 					{bundled.length > 0 ? (
-						<>
+						<div className="desk-integration-block">
 							{searching ? null : (
 								<div className="desk-integration-split">
 									<p>Bundled</p>
@@ -383,7 +399,7 @@ export function SkillsPanel(
 								onAdd={(id) => void run(id, "add")}
 								onRemove={(id) => void run(id, "remove")}
 							/>
-						</>
+						</div>
 					) : null}
 					<SkillsRemoteBlock
 						searching={searching}

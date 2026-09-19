@@ -39,7 +39,7 @@
   ],
   "scripts": {
     "start": "bun bin/harness.ts",
-    "test": "bun test src/core src/tools src/skills src/evals src/cli src/observability src/desktop src/integrations src/media src/memory src/init.test.ts src/runtime.test.ts desktop/src/rich-text.test.ts desktop/src/stream.test.ts desktop/src/dictation.test.ts desktop/src/thought.test.ts desktop/src/queue.test.ts desktop/src/composer-files.test.ts desktop/src/tool-label.test.ts desktop/src/reply-sources.test.ts desktop/src/pipeline.test.ts desktop/src/preview-render.test.ts",
+    "test": "bun test src/core src/tools src/skills src/evals src/cli src/observability src/desktop src/integrations src/media src/memory src/init.test.ts src/runtime.test.ts desktop/src/rich-text.test.ts desktop/src/stream.test.ts desktop/src/dictation.test.ts desktop/src/thought.test.ts desktop/src/queue.test.ts desktop/src/composer-files.test.ts desktop/src/tool-label.test.ts desktop/src/reply-sources.test.ts desktop/src/pipeline.test.ts desktop/src/preview-render.test.ts desktop/src/session-search.test.ts desktop/src/session-select.test.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "lint": "biome ci .",
     "format": "biome format --write .",

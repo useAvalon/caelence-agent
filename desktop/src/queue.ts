@@ -1,4 +1,4 @@
-import type { ComposerAttachment } from "./composer-files.ts";
+import type { ComposerAttachment } from "./composer-files";
 
 export interface QueuedMessage {
 	id: string;
