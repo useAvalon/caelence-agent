@@ -1,8 +1,17 @@
 <p align="center">
-	<img src="brand/logo/favicon-agent-bg-32.svg" alt="Caelence agent" width="96" height="96" />
+	<img src="brand/logo/favicon-agent-bg-32.svg" alt="" width="96" height="96" />
 </p>
 
-# Caelence agent
+<p align="center">
+	<picture>
+		<source media="(prefers-color-scheme: dark)" srcset="brand/logo/wordmark-caelence-agent-dark.png" />
+		<img src="brand/logo/wordmark-caelence-agent.png" alt="Caelence agent" width="480" />
+	</picture>
+</p>
+
+<p align="center">
+	<a href="https://m8ven.ai/mcp/useavalon/caelence-agent"><img src="https://m8ven.ai/badge/mcp/useavalon/caelence-agent" alt="M8ven Score" /></a>
+</p>
 
 A harness with a desktop app and a terminal UI for OpenRouter models, skills, and integrations.
 
