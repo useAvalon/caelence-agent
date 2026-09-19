@@ -57,4 +57,46 @@ describe("exec approval", () => {
 			await gate.request({ callId: "1", toolName: "exec", input: { command: "sudo ls" } }),
 		).toBe(false);
 	});
+
+	test("prompt policy asks before ordinary file writes", async () => {
+		const asked: string[] = [];
+		const alwaysAllow = new Set<string>();
+		const gate = createExecApprovalGate({
+			policy: "prompt",
+			alwaysAllow,
+			ask: async (req) => {
+				asked.push(`${req.toolName}:${String(req.input.path)}`);
+				return true;
+			},
+		});
+		expect(
+			await gate.request({
+				callId: "1",
+				toolName: "write_file",
+				input: { path: "README.md", content: "x" },
+			}),
+		).toBe(true);
+		expect(asked).toEqual(["write_file:README.md"]);
+		alwaysAllow.add("write_file");
+		alwaysAllow.add("edit_file");
+		expect(
+			await gate.request({
+				callId: "2",
+				toolName: "edit_file",
+				input: { path: "README.md", old: "x", new: "y" },
+			}),
+		).toBe(true);
+		expect(asked).toEqual(["write_file:README.md"]);
+	});
+
+	test("deny and auto still allow file writes", async () => {
+		const deny = createExecApprovalGate({ policy: "deny" });
+		const auto = createExecApprovalGate({ policy: "auto" });
+		expect(
+			await deny.request({ callId: "1", toolName: "write_file", input: { path: "a.ts" } }),
+		).toBe(true);
+		expect(
+			await auto.request({ callId: "2", toolName: "edit_file", input: { path: "a.ts" } }),
+		).toBe(true);
+	});
 });

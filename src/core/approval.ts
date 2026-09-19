@@ -16,6 +16,10 @@ export function isRiskyToolCall(toolName: string): boolean {
 	return toolName === "exec" || toolName === "git_commit";
 }
 
+export function isFileWriteTool(toolName: string): boolean {
+	return toolName === "edit_file" || toolName === "write_file";
+}
+
 /** Host-side denylist — local exec is the machine, not a sandbox. */
 export const DESTRUCTIVE_COMMAND_PATTERNS: readonly RegExp[] = [
 	/\bsudo\b/,
@@ -55,10 +59,28 @@ export interface ExecApprovalGateDeps {
 	alwaysAllow?: Set<string>;
 }
 
+async function promptAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Promise<boolean> {
+	deps.emit?.({
+		kind: "approval_request",
+		callId: req.callId,
+		toolName: req.toolName,
+		input: req.input,
+	});
+	if (!deps.ask) return false;
+	return deps.ask(req);
+}
+
 export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate {
 	const always = deps.alwaysAllow ?? new Set<string>();
 	return {
 		async request(req) {
+			if (isFileWriteTool(req.toolName)) {
+				if (always.has("write_file") || always.has("edit_file") || always.has(req.toolName)) {
+					return true;
+				}
+				if (deps.policy === "prompt" && deps.ask) return promptAsk(deps, req);
+				return true;
+			}
 			if (!isRiskyToolCall(req.toolName)) return true;
 			if (always.has(req.toolName)) return true;
 			if (deps.policy === "deny") return false;
@@ -66,14 +88,7 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 			if (deps.policy === "auto") {
 				return !isLikelyDestructive(command);
 			}
-			deps.emit?.({
-				kind: "approval_request",
-				callId: req.callId,
-				toolName: req.toolName,
-				input: req.input,
-			});
-			if (!deps.ask) return false;
-			return deps.ask(req);
+			return promptAsk(deps, req);
 		},
 	};
 }

@@ -6,6 +6,7 @@ import {
 	type ApprovalRequest,
 	createExecApprovalGate,
 	type ExecApprovalPolicy,
+	isFileWriteTool,
 } from "./core/approval.ts";
 import type { AgentEventEmitter, MainModelProvider } from "./core/events.ts";
 import { createHookRunner } from "./core/hooks.ts";
@@ -295,6 +296,10 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		},
 		allowRiskyAlways(toolName) {
 			alwaysAllow.add(toolName);
+			if (isFileWriteTool(toolName)) {
+				alwaysAllow.add("write_file");
+				alwaysAllow.add("edit_file");
+			}
 		},
 		async compact() {
 			if (!runtime.activeSessionId) return false;
