@@ -1,5 +1,6 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Glob } from "bun";
 import {
 	createMcpServer,
@@ -7,6 +8,7 @@ import {
 	jsonResult,
 	type McpServer,
 	type McpToolDefinition,
+	READ_ONLY_ANNOTATIONS,
 	textResult,
 } from "../core/mcp.ts";
 import { PathEscapeError, resolveUnderCwd, shouldSkipDir, toProjectRel } from "./paths.ts";
@@ -27,16 +29,36 @@ async function readUtf8(abs: string): Promise<string> {
 
 export interface LocalToolsOptions {
 	cwd: string;
+	extraWriteAbsolutes?: () => readonly string[];
+}
+
+function expandUserPath(path: string): string {
+	if (path === "~") return homedir();
+	if (path.startsWith("~/")) return resolve(homedir(), path.slice(2));
+	return path;
+}
+
+function resolveToolPath(cwd: string, rel: string, extra: ReadonlySet<string>): string {
+	const trimmed = rel.trim();
+	if (trimmed.startsWith("~") || isAbsolute(trimmed)) {
+		const abs = resolve(expandUserPath(trimmed));
+		if (extra.has(abs)) return abs;
+		throw new PathEscapeError(rel);
+	}
+	return resolveUnderCwd(cwd, rel);
 }
 
 export function createLocalTools(options: LocalToolsOptions): McpServer {
 	const cwd = options.cwd;
+	const extras = (): ReadonlySet<string> =>
+		new Set((options.extraWriteAbsolutes?.() ?? []).map((path) => resolve(expandUserPath(path))));
 
 	const tools: McpToolDefinition[] = [
 		{
 			name: "read_file",
 			description:
 				"Read a UTF-8 file under the project root. Prefer this over exec for inspecting source.",
+			annotations: READ_ONLY_ANNOTATIONS,
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -46,7 +68,8 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 			},
 			async handler(raw) {
 				try {
-					const abs = resolveUnderCwd(cwd, asString(raw.path));
+					const extra = extras();
+					const abs = resolveToolPath(cwd, asString(raw.path), extra);
 					const content = await readUtf8(abs);
 					return textResult(content);
 				} catch (err) {
@@ -57,7 +80,13 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 		{
 			name: "write_file",
 			description:
-				"Create or overwrite a whole file under the project root (up to 10 MB). Prefer edit_file for a small change.",
+				"Create or overwrite a whole file under the project root (up to 10 MB). Prefer edit_file for a small change. Call this to apply the write. Do not tell the user the file is saved until this tool succeeds.",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: true,
+				openWorldHint: false,
+			},
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -68,7 +97,8 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 			},
 			async handler(raw) {
 				try {
-					const abs = resolveUnderCwd(cwd, asString(raw.path));
+					const extra = extras();
+					const abs = resolveToolPath(cwd, asString(raw.path), extra);
 					const content = asString(raw.content);
 					if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) {
 						return errorResult(`File exceeds ${MAX_FILE_BYTES} bytes`);
@@ -76,7 +106,7 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 					await mkdir(dirname(abs), { recursive: true });
 					await writeFile(abs, content, "utf8");
 					return jsonResult({
-						path: toProjectRel(cwd, abs),
+						path: extra.has(abs) ? abs : toProjectRel(cwd, abs),
 						bytes: Buffer.byteLength(content, "utf8"),
 					});
 				} catch (err) {
@@ -87,7 +117,13 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 		{
 			name: "edit_file",
 			description:
-				"Replace an exact snippet in an existing file. old_str must match uniquely unless replace_all is true.",
+				"Replace an exact snippet in an existing file. old_str must match uniquely unless replace_all is true. Call this to apply the edit. Do not tell the user the file is changed until this tool succeeds.",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: false,
+				openWorldHint: false,
+			},
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -103,7 +139,8 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 			},
 			async handler(raw) {
 				try {
-					const abs = resolveUnderCwd(cwd, asString(raw.path));
+					const extra = extras();
+					const abs = resolveToolPath(cwd, asString(raw.path), extra);
 					const oldStr = asString(raw.old_str);
 					const newStr = asString(raw.new_str);
 					if (!oldStr) return errorResult("old_str is empty");
@@ -125,7 +162,10 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 						? original.split(oldStr).join(newStr)
 						: original.replace(oldStr, newStr);
 					await writeFile(abs, next, "utf8");
-					return jsonResult({ path: toProjectRel(cwd, abs), replaced: replaceAll ? "all" : "one" });
+					return jsonResult({
+						path: extra.has(abs) ? abs : toProjectRel(cwd, abs),
+						replaced: replaceAll ? "all" : "one",
+					});
 				} catch (err) {
 					return errorResult(err instanceof Error ? err.message : String(err));
 				}
@@ -134,6 +174,7 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 		{
 			name: "glob",
 			description: "List project-relative file paths matching a glob pattern (e.g. **/*.ts).",
+			annotations: READ_ONLY_ANNOTATIONS,
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -162,6 +203,7 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 		{
 			name: "grep",
 			description: "Search file contents under the project root. Prefer this over exec for search.",
+			annotations: READ_ONLY_ANNOTATIONS,
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -212,6 +254,12 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 			name: "exec",
 			description:
 				"Run a shell command in the project root. Times out after 120 seconds. Do not use exec to read or search files.",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: false,
+				openWorldHint: true,
+			},
 			inputSchema: {
 				type: "object",
 				properties: {

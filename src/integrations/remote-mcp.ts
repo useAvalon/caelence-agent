@@ -7,6 +7,7 @@ import {
 	errorResult,
 	jsonResult,
 	type McpToolDefinition,
+	resolveToolAnnotations,
 	type ToolResult,
 	textResult,
 } from "../core/mcp.ts";
@@ -17,6 +18,7 @@ export interface RemoteMcpToolMeta {
 	name: string;
 	description: string;
 	inputSchema: Record<string, unknown>;
+	annotations?: unknown;
 }
 
 export interface RemoteMcpClient {
@@ -136,7 +138,7 @@ export async function openRemoteMcp(input: {
 					t.inputSchema && typeof t.inputSchema === "object" && !Array.isArray(t.inputSchema)
 						? (t.inputSchema as Record<string, unknown>)
 						: { type: "object", properties: {} };
-				out.push({ name, description, inputSchema });
+				out.push({ name, description, inputSchema, annotations: t.annotations });
 			}
 			return out;
 		},
@@ -207,6 +209,7 @@ async function loadSourceTools(input: {
 			name,
 			description: `[${input.source.label}] ${tool.description}`,
 			inputSchema: schema,
+			annotations: resolveToolAnnotations(tool.annotations),
 			async handler(raw: Record<string, unknown>): Promise<ToolResult> {
 				const { projectId: _projectId, ...args } = raw;
 				return client.callTool(tool.name, args);

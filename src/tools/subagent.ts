@@ -25,6 +25,12 @@ export function createTaskTool(options: TaskToolOptions): McpToolDefinition {
 			"Spawn a subagent for a focused job (research, an isolated edit, one copy-pipeline step). " +
 			"Pass a complete prompt. Optional `skills` injects those skill bodies into the subagent. " +
 			"Returns the subagent's final reply. Do not use for a one-line question.",
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: false,
+			openWorldHint: true,
+		},
 		inputSchema: {
 			type: "object",
 			properties: {
