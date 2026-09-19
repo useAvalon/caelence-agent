@@ -48,6 +48,80 @@ function resolveToolPath(cwd: string, rel: string, extra: ReadonlySet<string>): 
 	return resolveUnderCwd(cwd, rel);
 }
 
+function toolError(err: unknown): ReturnType<typeof errorResult> {
+	return errorResult(err instanceof Error ? err.message : String(err));
+}
+
+function skipsPath(rel: string): boolean {
+	return rel.split("/").some((part) => shouldSkipDir(part));
+}
+
+async function globProjectFiles(
+	cwd: string,
+	pattern: string,
+): Promise<{ matches: string[]; truncated: boolean }> {
+	const glob = new Glob(pattern);
+	const matches: string[] = [];
+	for await (const path of glob.scan({ cwd, onlyFiles: true, dot: false })) {
+		if (skipsPath(path)) continue;
+		matches.push(path);
+		if (matches.length >= 500) break;
+	}
+	matches.sort((left, right) => left.localeCompare(right));
+	return { matches, truncated: matches.length >= 500 };
+}
+
+function lineMatches(line: string, pattern: string, re: RegExp | null): boolean {
+	return re ? re.test(line) : line.includes(pattern);
+}
+
+function collectLineHits(
+	rel: string,
+	content: string,
+	pattern: string,
+	re: RegExp | null,
+	hits: Array<{ path: string; line: number; text: string }>,
+	maxMatches: number,
+): boolean {
+	const lines = content.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] ?? "";
+		if (!lineMatches(line, pattern, re)) continue;
+		hits.push({ path: rel, line: i + 1, text: line.slice(0, 240) });
+		if (hits.length >= maxMatches) return true;
+	}
+	return false;
+}
+
+async function readFileIfPresent(abs: string): Promise<string | undefined> {
+	try {
+		return await readFile(abs, "utf8");
+	} catch {
+		return undefined;
+	}
+}
+
+async function grepProjectFiles(
+	cwd: string,
+	pattern: string,
+	fileGlob: string,
+	useRegex: boolean,
+	maxMatches: number,
+): Promise<{ hits: Array<{ path: string; line: number; text: string }>; truncated: boolean }> {
+	const re = useRegex ? new RegExp(pattern) : null;
+	const hits: Array<{ path: string; line: number; text: string }> = [];
+	const glob = new Glob(fileGlob);
+	for await (const rel of glob.scan({ cwd, onlyFiles: true, dot: false })) {
+		if (skipsPath(rel)) continue;
+		const content = await readFileIfPresent(join(cwd, rel));
+		if (content === undefined) continue;
+		if (collectLineHits(rel, content, pattern, re, hits, maxMatches)) {
+			return { hits, truncated: true };
+		}
+	}
+	return { hits, truncated: false };
+}
+
 export function createLocalTools(options: LocalToolsOptions): McpServer {
 	const cwd = options.cwd;
 	const extras = (): ReadonlySet<string> =>
@@ -185,18 +259,10 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 			async handler(raw) {
 				try {
 					const pattern = asString(raw.pattern) || "**/*";
-					const glob = new Glob(pattern);
-					const matches: string[] = [];
-					for await (const path of glob.scan({ cwd, onlyFiles: true, dot: false })) {
-						const parts = path.split("/");
-						if (parts.some((p) => shouldSkipDir(p))) continue;
-						matches.push(path);
-						if (matches.length >= 500) break;
-					}
-					matches.sort();
-					return jsonResult({ pattern, matches, truncated: matches.length >= 500 });
+					const found = await globProjectFiles(cwd, pattern);
+					return jsonResult({ pattern, matches: found.matches, truncated: found.truncated });
 				} catch (err) {
-					return errorResult(err instanceof Error ? err.message : String(err));
+					return toolError(err);
 				}
 			},
 		},
@@ -218,35 +284,16 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 				try {
 					const pattern = asString(raw.pattern);
 					if (!pattern) return errorResult("pattern is empty");
-					const fileGlob = asString(raw.glob) || "**/*";
-					const maxMatches = typeof raw.max_matches === "number" ? raw.max_matches : 100;
-					const useRegex = raw.regex === true;
-					const re = useRegex ? new RegExp(pattern) : null;
-					const hits: Array<{ path: string; line: number; text: string }> = [];
-					const glob = new Glob(fileGlob);
-					for await (const rel of glob.scan({ cwd, onlyFiles: true, dot: false })) {
-						const parts = rel.split("/");
-						if (parts.some((p) => shouldSkipDir(p))) continue;
-						let content: string;
-						try {
-							content = await readFile(join(cwd, rel), "utf8");
-						} catch {
-							continue;
-						}
-						const lines = content.split("\n");
-						for (let i = 0; i < lines.length; i++) {
-							const line = lines[i] ?? "";
-							const ok = re ? re.test(line) : line.includes(pattern);
-							if (!ok) continue;
-							hits.push({ path: rel, line: i + 1, text: line.slice(0, 240) });
-							if (hits.length >= maxMatches) {
-								return jsonResult({ pattern, hits, truncated: true });
-							}
-						}
-					}
-					return jsonResult({ pattern, hits, truncated: false });
+					const found = await grepProjectFiles(
+						cwd,
+						pattern,
+						asString(raw.glob) || "**/*",
+						raw.regex === true,
+						typeof raw.max_matches === "number" ? raw.max_matches : 100,
+					);
+					return jsonResult({ pattern, hits: found.hits, truncated: found.truncated });
 				} catch (err) {
-					return errorResult(err instanceof Error ? err.message : String(err));
+					return toolError(err);
 				}
 			},
 		},

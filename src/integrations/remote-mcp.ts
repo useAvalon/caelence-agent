@@ -35,9 +35,20 @@ export interface LinkedMcpSource {
 	accessToken: string;
 }
 
+function trimUnderscores(value: string): string {
+	let trimmed = value;
+	while (trimmed.startsWith("_")) trimmed = trimmed.slice(1);
+	while (trimmed.endsWith("_")) trimmed = trimmed.slice(0, -1);
+	return trimmed;
+}
+
+function slugToken(value: string, pattern: RegExp): string {
+	return trimUnderscores(value.replace(pattern, "_"));
+}
+
 export function namespaceRemoteTool(connectorId: string, remoteName: string): string {
-	const prefix = connectorId.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-	const tool = remoteName.replace(/[^a-zA-Z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+	const prefix = slugToken(connectorId, /[^a-zA-Z0-9]+/g);
+	const tool = slugToken(remoteName, /\W+/g);
 	return `${prefix}__${tool}`;
 }
 
@@ -223,24 +234,49 @@ function ensureObjectSchema(schema: Record<string, unknown>): Record<string, unk
 	return { type: "object", properties: {}, ...(schema as object) };
 }
 
-function mapCallToolResult(result: unknown): ToolResult {
-	if (!result || typeof result !== "object") {
-		return textResult(String(result ?? ""));
+function scalarToolText(value: unknown): string | undefined {
+	if (value == null) return "";
+	if (typeof value === "string") return value;
+	if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+		return `${value}`;
 	}
+	return undefined;
+}
+
+function contentTexts(content: unknown): string[] {
+	if (!Array.isArray(content)) return [];
+	const textParts: string[] = [];
+	for (const block of content) {
+		if (!block || typeof block !== "object") continue;
+		const b = block as { type?: string; text?: string };
+		if (b.type === "text" && typeof b.text === "string") textParts.push(b.text);
+		else textParts.push(JSON.stringify(block));
+	}
+	return textParts;
+}
+
+function jsonObjectOrNull(text: string): Record<string, unknown> | null {
+	try {
+		const parsed: unknown = JSON.parse(text);
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as Record<string, unknown>;
+		}
+	} catch {
+		/* plain text */
+	}
+	return null;
+}
+
+function mapCallToolResult(result: unknown): ToolResult {
+	const scalar = scalarToolText(result);
+	if (scalar !== undefined) return textResult(scalar);
 	const r = result as {
 		content?: unknown;
 		isError?: boolean;
 		structuredContent?: Record<string, unknown>;
 	};
 	const isError = r.isError === true;
-	const blocks = Array.isArray(r.content) ? r.content : [];
-	const textParts: string[] = [];
-	for (const block of blocks) {
-		if (!block || typeof block !== "object") continue;
-		const b = block as { type?: string; text?: string };
-		if (b.type === "text" && typeof b.text === "string") textParts.push(b.text);
-		else textParts.push(JSON.stringify(block));
-	}
+	const textParts = contentTexts(r.content);
 	if (textParts.length === 0 && r.structuredContent) {
 		return jsonResult(r.structuredContent, isError);
 	}
@@ -248,14 +284,8 @@ function mapCallToolResult(result: unknown): ToolResult {
 		return jsonResult(result as Record<string, unknown>, isError);
 	}
 	const text = textParts.join("\n");
-	try {
-		const parsed: unknown = JSON.parse(text);
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			return jsonResult(parsed, isError);
-		}
-	} catch {
-		/* plain text */
-	}
+	const parsed = jsonObjectOrNull(text);
+	if (parsed) return jsonResult(parsed, isError);
 	return textResult(text, isError);
 }
 

@@ -71,6 +71,12 @@ export async function loadConfig(cwd: string): Promise<HarnessConfig> {
 	};
 }
 
+export function stripTrailingSlashes(value: string): string {
+	let trimmed = value;
+	while (trimmed.endsWith("/")) trimmed = trimmed.slice(0, -1);
+	return trimmed;
+}
+
 export function resolveOpenRouter(config: HarnessConfig): {
 	apiKey: string;
 	baseUrl: string;
@@ -82,5 +88,5 @@ export function resolveOpenRouter(config: HarnessConfig): {
 		config.openrouterBaseUrl ||
 		OPENROUTER_DEFAULT_BASE_URL;
 	const model = process.env.OPENROUTER_MODEL?.trim() || config.model;
-	return { apiKey, baseUrl: baseUrl.replace(/\/+$/, ""), model };
+	return { apiKey, baseUrl: stripTrailingSlashes(baseUrl), model };
 }
