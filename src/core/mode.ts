@@ -55,6 +55,7 @@ export function modePrompt(mode: AgentMode): string {
 	return [
 		"## Mode: agent",
 		"You may edit files, run approved exec, and commit when the user asked for the change.",
+		"If they asked to change a file, call write_file or edit_file. Do not claim the write until the tool succeeds.",
 		"Use todo_write for multi-step work. Prefer git_status / git_diff / git_log over exec for git.",
 	].join("\n");
 }

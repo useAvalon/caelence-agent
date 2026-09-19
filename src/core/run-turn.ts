@@ -2,7 +2,7 @@ import { noopObservability } from "../observability/noop.ts";
 import { sanitize } from "../observability/sanitize.ts";
 import type { Observability } from "../observability/types.ts";
 import type { ApprovalGate } from "./approval.ts";
-import { isRiskyToolCall } from "./approval.ts";
+import { isFileWriteTool, isRiskyToolCall } from "./approval.ts";
 import { errorMessage, isAbortError } from "./errors.ts";
 import type { AgentEventEmitter, MainModelProvider } from "./events.ts";
 import type { HookRunner } from "./hooks.ts";
@@ -359,7 +359,7 @@ async function invokeGuardedBody(
 			result = errorResult(errorText);
 		}
 		let approved = true;
-		if (!result && isRiskyToolCall(def.name)) {
+		if (!result && (isRiskyToolCall(def.name) || isFileWriteTool(def.name))) {
 			approved = await approval.request({ callId, toolName: def.name, input });
 		}
 		if (result) {
@@ -439,6 +439,7 @@ export function buildSystemPrompt(input: {
 		"You are a coding agent in this project.",
 		`Project root: ${input.cwd}.`,
 		"Prefer small, targeted edits. Use edit_file for snippets, write_file for new files.",
+		"If the user asked to change a file, call write_file or edit_file before you reply. Do not say you wrote, edited, or saved a file unless that tool returned success.",
 		"Use read_file, glob, and grep to inspect the repo. Do not use exec to read or search files.",
 		"Use git_status, git_diff, and git_log for git. git_commit requires approval and does not push.",
 		"Read skills with read_skill when a task matches a skill name. Spawn a subagent with task for a focused job.",
