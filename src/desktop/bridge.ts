@@ -21,6 +21,12 @@ import {
 } from "../integrations/connect.ts";
 import { readProviderOAuth, writeProviderOAuth } from "../integrations/oauth-clients.ts";
 import { listPublicIntegrations, removeConnection } from "../integrations/store.ts";
+import {
+	type AddUserMcpInput,
+	addUserMcpServer,
+	listPublicMcps,
+	removeUserMcpServer,
+} from "../mcp/user-servers.ts";
 import { transcribeAudio } from "../media/openrouter-generate.ts";
 import { readMediaPrefs } from "../media/prefs.ts";
 import { PRODUCT_NAME } from "../product.ts";
@@ -383,6 +389,31 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		removeConnection(connectorId);
 		await harness.reloadIntegrations();
 		return json({ ok: true, items: listPublicIntegrations() });
+	};
+
+	const mcpPage = () => ({ items: listPublicMcps(harness.cwd, harness.config.mcp) });
+
+	const route_get_mcp = async (_req: Request, _url: URL): Promise<Response> => {
+		return json(mcpPage());
+	};
+
+	const route_post_mcp_add = async (req: Request, _url: URL): Promise<Response> => {
+		const body = (await readJson(req)) as AddUserMcpInput;
+		const added = addUserMcpServer(harness.cwd, body, harness.config.mcp);
+		if ("error" in added) return json({ error: added.error }, 400);
+		await harness.reloadExtraMcp();
+		return json({ ok: true, ...mcpPage() });
+	};
+
+	const route_post_mcp_remove = async (req: Request, _url: URL): Promise<Response> => {
+		const body = await readJson(req);
+		const id = typeof body.id === "string" ? body.id.trim() : "";
+		if (!id) return json({ error: "id is required." }, 400);
+		if (!removeUserMcpServer(harness.cwd, id)) {
+			return json({ error: "MCP not found." }, 400);
+		}
+		await harness.reloadExtraMcp();
+		return json({ ok: true, ...mcpPage() });
 	};
 
 	const skillsPage = (popular = cachedPopularSkills()) =>
@@ -780,6 +811,9 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		"GET /integrations": route_get_integrations,
 		"POST /integrations/connect": route_post_integrations_connect,
 		"POST /integrations/disconnect": route_post_integrations_disconnect,
+		"GET /mcp": route_get_mcp,
+		"POST /mcp/add": route_post_mcp_add,
+		"POST /mcp/remove": route_post_mcp_remove,
 		"GET /skills": route_get_skills,
 		"GET /skills/popular": route_get_skills_popular,
 		"GET /skills/search": route_get_skills_search,

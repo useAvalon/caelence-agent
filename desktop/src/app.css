@@ -1630,6 +1630,75 @@ p.desk-line__caption {
 	gap: 12px;
 }
 
+.desk-pane-tabs {
+	display: flex;
+	align-self: start;
+	gap: 2px;
+	padding: 3px;
+	border-radius: var(--r-lg);
+	background: var(--bg-inset);
+}
+
+.desk-pane-tabs button {
+	margin: 0;
+	padding: 6px 12px;
+	border: 0;
+	border-radius: var(--r-md);
+	background: transparent;
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 1.2;
+	cursor: pointer;
+}
+
+.desk-pane-tabs button.is-on {
+	background: var(--card);
+	color: var(--text);
+	box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.desk-pane-tabs button:focus-visible {
+	outline: 1.5px solid var(--measure);
+	outline-offset: 1px;
+}
+
+.desk-pane-tabs--compact button {
+	padding: 5px 10px;
+	font-weight: 500;
+}
+
+.desk-mcp-form {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.desk-mcp-form label {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.desk-mcp-form label > span:first-child {
+	font-weight: 600;
+}
+
+.desk-mcp-form .cel-btn {
+	align-self: flex-start;
+}
+
+.desk-mcp-form textarea.cel-input {
+	height: auto;
+	min-height: 148px;
+	padding-top: 8px;
+	padding-bottom: 8px;
+	resize: vertical;
+	line-height: 1.45;
+	font-family: var(--mono);
+}
+
 .desk-integrations-lead {
 	margin: 0;
 	color: var(--text-secondary);

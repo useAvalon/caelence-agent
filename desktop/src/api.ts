@@ -250,6 +250,48 @@ export function disconnectIntegration(
 	});
 }
 
+export interface PublicUserMcp {
+	id: string;
+	label: string;
+	kind: "stdio" | "http";
+	detail: string;
+	origin: "user" | "config";
+	removable: boolean;
+}
+
+export interface AddMcpInput {
+	label?: string;
+	kind: "stdio" | "http";
+	command?: string;
+	args?: string;
+	url?: string;
+	token?: string;
+}
+
+export function getMcps(bridge: BridgeClient): Promise<{ items: PublicUserMcp[] }> {
+	return request(bridge, "/mcp");
+}
+
+export function addMcp(
+	bridge: BridgeClient,
+	input: AddMcpInput,
+): Promise<{ ok: boolean; items: PublicUserMcp[] }> {
+	return request(bridge, "/mcp/add", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
+}
+
+export function removeMcp(
+	bridge: BridgeClient,
+	id: string,
+): Promise<{ ok: boolean; items: PublicUserMcp[] }> {
+	return request(bridge, "/mcp/remove", {
+		method: "POST",
+		body: JSON.stringify({ id }),
+	});
+}
+
 export function openUrl(bridge: BridgeClient, url: string): Promise<{ ok: boolean }> {
 	return request(bridge, "/open", {
 		method: "POST",

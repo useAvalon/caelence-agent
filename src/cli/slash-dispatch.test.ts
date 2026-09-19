@@ -58,6 +58,7 @@ function fakeHarness(overrides: Partial<HarnessRuntime> = {}): HarnessRuntime {
 		disabledSkills: () => [],
 		enableSkill: () => ({ ok: true }),
 		reloadIntegrations: async () => {},
+		reloadExtraMcp: async () => {},
 		chat: async () => "",
 		observability: {} as HarnessRuntime["observability"],
 		close() {},

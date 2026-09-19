@@ -88,6 +88,7 @@ import {
 import { FloatNotice } from "./FloatNotice";
 import { integrationMatches } from "./integration-search";
 import { LogoMark } from "./LogoMark";
+import { McpPanel } from "./McpPanel";
 import { pickerKeyAction, pickerStartIndex, stepIndex } from "./picker-nav";
 import {
 	enqueueMessage,
@@ -1936,6 +1937,45 @@ function IntegrationsPanel(
 		onNotice: (text: string) => void;
 	}>,
 ): React.ReactElement {
+	const [tab, setTab] = useState<"integrations" | "mcp">("integrations");
+
+	return (
+		<div className="desk-integrations">
+			<div className="desk-pane-tabs" role="tablist" aria-label="Integrations and MCP">
+				<button
+					type="button"
+					role="tab"
+					aria-selected={tab === "integrations"}
+					className={tab === "integrations" ? "is-on" : undefined}
+					onClick={() => setTab("integrations")}
+				>
+					Integrations
+				</button>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={tab === "mcp"}
+					className={tab === "mcp" ? "is-on" : undefined}
+					onClick={() => setTab("mcp")}
+				>
+					MCP
+				</button>
+			</div>
+			{tab === "mcp" ? (
+				<McpPanel bridge={props.bridge} onNotice={props.onNotice} />
+			) : (
+				<HostedIntegrationsList bridge={props.bridge} onNotice={props.onNotice} />
+			)}
+		</div>
+	);
+}
+
+function HostedIntegrationsList(
+	props: Readonly<{
+		bridge: BridgeClient;
+		onNotice: (text: string) => void;
+	}>,
+): React.ReactElement {
 	const [items, setItems] = useState<PublicIntegration[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [loadFailed, setLoadFailed] = useState(false);
@@ -1980,23 +2020,15 @@ function IntegrationsPanel(
 	};
 
 	if (!items && !loadFailed) {
-		return (
-			<div className="desk-integrations">
-				<p>Loading integrations</p>
-			</div>
-		);
+		return <p>Loading integrations</p>;
 	}
 
 	if (!items && loadFailed) {
-		return (
-			<div className="desk-integrations">
-				<p className="desk-side-empty">Integrations could not be loaded</p>
-			</div>
-		);
+		return <p className="desk-side-empty">Integrations could not be loaded</p>;
 	}
 
 	return (
-		<div className="desk-integrations">
+		<>
 			<p className="desk-integrations-lead">
 				Hosted MCP servers the agent can call. App connectors for published sites stay in the
 				builder.
@@ -2073,7 +2105,7 @@ function IntegrationsPanel(
 					) : null}
 				</>
 			)}
-		</div>
+		</>
 	);
 }
 
