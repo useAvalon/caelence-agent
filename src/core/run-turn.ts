@@ -74,7 +74,7 @@ export async function runTurn(
 			if (!session) throw new Error("No session to edit.");
 			session = await deps.store.save(replaceUserTurn(session, req.editUserTurn, req.message));
 		} else {
-			if (!session) session = await deps.store.create(deps.systemPrompt, req.model);
+			session ??= await deps.store.create(deps.systemPrompt, req.model);
 			session = await deps.store.append(session, {
 				kind: "turn",
 				role: "user",
@@ -340,6 +340,68 @@ async function invokeGuarded(
 	);
 }
 
+async function blockedByPreTool(
+	def: McpToolDefinition,
+	input: Record<string, unknown>,
+	hooks?: HookRunner,
+): Promise<string | undefined> {
+	const hook = await hooks?.preTool(def.name, input);
+	if (hook && !hook.allow) {
+		return hook.reason ?? `Tool call "${def.name}" was blocked by a pre_tool hook.`;
+	}
+	return undefined;
+}
+
+async function approvalGranted(
+	def: McpToolDefinition,
+	approval: ApprovalGate,
+	callId: string,
+	input: Record<string, unknown>,
+): Promise<boolean> {
+	if (!isRiskyToolCall(def.name) && !isFileWriteTool(def.name)) return true;
+	return approval.request({ callId, toolName: def.name, input });
+}
+
+async function runToolHandler(
+	def: McpToolDefinition,
+	input: Record<string, unknown>,
+): Promise<{ result: ToolResult; success: boolean; errorText?: string }> {
+	try {
+		const handlerResult = await def.handler(input);
+		if (handlerResult.isError) {
+			return {
+				result: handlerResult,
+				success: false,
+				errorText: toolResultText(handlerResult),
+			};
+		}
+		return { result: handlerResult, success: true };
+	} catch (handlerErr) {
+		const errorText = errorMessage(handlerErr);
+		return { result: errorResult(errorText), success: false, errorText };
+	}
+}
+
+function isTodoItem(item: unknown): item is { id: string; content: string; status: string } {
+	if (!item || typeof item !== "object") return false;
+	const row = item as { id?: unknown; content?: unknown; status?: unknown };
+	return (
+		typeof row.id === "string" && typeof row.content === "string" && typeof row.status === "string"
+	);
+}
+
+function emitTodosIfNeeded(
+	def: McpToolDefinition,
+	result: ToolResult,
+	emit: AgentEventEmitter,
+	success: boolean,
+): void {
+	if (!success || def.name !== "todo_write") return;
+	const items = (result.structuredContent as { items?: unknown } | undefined)?.items;
+	if (!Array.isArray(items)) return;
+	emit({ kind: "todos", items: items.filter(isTodoItem) });
+}
+
 async function invokeGuardedBody(
 	def: McpToolDefinition,
 	approval: ApprovalGate,
@@ -354,34 +416,18 @@ async function invokeGuardedBody(
 
 	try {
 		emit({ kind: "tool_call_start", toolName: def.name, callId, input });
-		const hook = await hooks?.preTool(def.name, input);
-		if (hook && !hook.allow) {
-			errorText = hook.reason ?? `Tool call "${def.name}" was blocked by a pre_tool hook.`;
+		const blocked = await blockedByPreTool(def, input, hooks);
+		if (blocked) {
+			errorText = blocked;
 			result = errorResult(errorText);
-		}
-		let approved = true;
-		if (!result && (isRiskyToolCall(def.name) || isFileWriteTool(def.name))) {
-			approved = await approval.request({ callId, toolName: def.name, input });
-		}
-		if (result) {
-			// hook already denied
-		} else if (!approved) {
+		} else if (!(await approvalGranted(def, approval, callId, input))) {
 			errorText = `Tool call "${def.name}" ${REJECTED_TOOL_MESSAGE}.`;
 			result = errorResult(errorText);
 		} else {
-			try {
-				const handlerResult = await def.handler(input);
-				if (handlerResult.isError) {
-					errorText = toolResultText(handlerResult);
-					result = handlerResult;
-				} else {
-					result = handlerResult;
-					success = true;
-				}
-			} catch (handlerErr) {
-				errorText = errorMessage(handlerErr);
-				result = errorResult(errorText);
-			}
+			const ran = await runToolHandler(def, input);
+			result = ran.result;
+			success = ran.success;
+			errorText = ran.errorText;
 		}
 	} catch (dispatchErr) {
 		errorText = errorMessage(dispatchErr);
@@ -390,22 +436,7 @@ async function invokeGuardedBody(
 
 	const finalResult = result ?? errorResult("tool produced no result");
 	void hooks?.postTool(def.name, input, success);
-	if (success && def.name === "todo_write") {
-		const items = (finalResult.structuredContent as { items?: unknown } | undefined)?.items;
-		if (Array.isArray(items)) {
-			emit({
-				kind: "todos",
-				items: items.filter(
-					(item): item is { id: string; content: string; status: string } =>
-						!!item &&
-						typeof item === "object" &&
-						typeof (item as { id?: unknown }).id === "string" &&
-						typeof (item as { content?: unknown }).content === "string" &&
-						typeof (item as { status?: unknown }).status === "string",
-				),
-			});
-		}
-	}
+	emitTodosIfNeeded(def, finalResult, emit, success);
 	emit({
 		kind: "tool_call_end",
 		toolName: def.name,
@@ -440,6 +471,7 @@ export function buildSystemPrompt(input: {
 	userInstructions?: string;
 	projectInstructions?: string;
 	skillCatalog?: string;
+	memory?: string;
 	mode?: AgentMode;
 }): string {
 	const parts = [
@@ -464,6 +496,7 @@ export function buildSystemPrompt(input: {
 	} else if (input.instructions?.trim()) {
 		parts.push("## Instructions", input.instructions.trim());
 	}
+	if (input.memory?.trim()) parts.push("## Memory", input.memory.trim());
 	if (input.skillCatalog?.trim()) parts.push(input.skillCatalog.trim());
 	return parts.join("\n\n");
 }

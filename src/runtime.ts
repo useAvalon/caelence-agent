@@ -42,6 +42,10 @@ import { type ChatFn, createOpenRouterChat } from "./evals/runner.ts";
 import { buildRemoteMcpTools } from "./integrations/remote-mcp.ts";
 import { linkedMcpSources } from "./integrations/store.ts";
 import { listUserMcpServers, userMcpToolPrefix } from "./mcp/user-servers.ts";
+import { extractMemories } from "./memory/extract.ts";
+import { isMemoryEnabled } from "./memory/prefs.ts";
+import { formatRetrievedMemory } from "./memory/prompt.ts";
+import { searchFacts } from "./memory/store.ts";
 import { createObservability } from "./observability/create.ts";
 import { noopObservability } from "./observability/noop.ts";
 import { harnessPromptRecords, syncPrompts } from "./observability/prompts.ts";
@@ -491,10 +495,11 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 					}),
 				);
 			}
+			const memoryOn = isMemoryEnabled({ configEnabled: config.memory?.enabled });
 			const deps: RunTurnDeps = {
 				cwd,
 				name: config.name,
-				systemPrompt,
+				systemPrompt: systemPromptWithMemory(systemPrompt, cwd, message, memoryOn),
 				tools,
 				approval,
 				store,
@@ -534,6 +539,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				{ signal: turnOptions?.signal },
 			);
 			if (session) runtime.activeSessionId = session.id;
+			scheduleMemoryExtract(memoryOn, cwd, session, provider);
 			return session;
 		},
 		close() {
@@ -542,4 +548,26 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		},
 	};
 	return runtime;
+}
+
+function systemPromptWithMemory(
+	base: string,
+	cwd: string,
+	message: string,
+	enabled: boolean,
+): string {
+	if (!enabled) return base;
+	const block = formatRetrievedMemory(searchFacts(cwd, message));
+	if (!block) return base;
+	return `${base}\n\n## Memory\n${block}`;
+}
+
+function scheduleMemoryExtract(
+	enabled: boolean,
+	cwd: string,
+	session: Session | undefined,
+	provider: MainModelProvider,
+): void {
+	if (!enabled || !session) return;
+	void extractMemories({ cwd, session, provider }).catch(() => undefined);
 }

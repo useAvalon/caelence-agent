@@ -66,6 +66,8 @@ export default {
 | `AGENTS.md` | Project instructions |
 | `~/.harness/AGENTS.md` | User instructions for every project |
 | `.harness/sessions/` | Session logs |
+| `~/.harness/memory/` | User memory facts, if enabled |
+| `.harness/memory/` | Project memory facts, if enabled |
 | `~/.harness/integrations.json` | Connected hosted MCP servers |
 
 The desktop stores the OpenRouter key in `~/.harness`. The terminal UI reads `OPENROUTER_API_KEY`, and optionally `OPENROUTER_MODEL` and `OPENROUTER_BASE_URL`.
@@ -112,6 +114,7 @@ In the desktop and the terminal UI, `/` opens slash commands, and Tab completes 
 /model             pick a model
 /mode              ask, plan, or agent
 /compact           summarize earlier turns
+/memory            remember across chats
 /image [prompt]    generate an image
 /video [prompt]    generate a clip
 /transcribe        speech to text model
@@ -163,6 +166,10 @@ Each connection is stored in `~/.harness/integrations.json`, and disconnecting r
 | `agent` | Writes, `exec`, `git_commit`, and `task` |
 
 Start in `ask`, `plan`, or `agent` with `/mode`, which changes which tools are available. `exec` and `git_commit` prompt for approval by default (`prompt`), and `auto` still refuses destructive commands. Local exec is the host machine rather than a sandbox.
+
+## Memory
+
+Turn it on from the Memory tab or `/memory on` if you want later chats to keep prefs and project decisions. After a turn the model adds a few of those to `~/.harness/memory` and `.harness/memory`, and the next session only sees the ones that fit what you asked. `/memory` lists them, `/memory delete 1` removes a line, and `/memory pin 1` copies it into `AGENTS.md`.
 
 ## Library
 

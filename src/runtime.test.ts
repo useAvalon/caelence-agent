@@ -86,6 +86,43 @@ describe("createHarness modes", () => {
 		}
 	});
 
+	test("injects retrieved memory when the user has enabled it", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-mem-rt-"));
+		const home = await mkdtemp(join(tmpdir(), "harness-mem-rt-home-"));
+		const prevHome = process.env.HARNESS_HOME;
+		process.env.HARNESS_HOME = home;
+		try {
+			const { writeMemoryPrefs } = await import("./memory/prefs.ts");
+			const { addFacts } = await import("./memory/store.ts");
+			writeMemoryPrefs({ enabled: true });
+			addFacts(cwd, [{ text: "Prefer bun over npm for installs", scope: "user" }]);
+			let prompt = "";
+			const harness = await createHarness({
+				cwd,
+				config: DEFAULT_CONFIG,
+				provider: fakeProvider,
+				constructAgent: (input) => {
+					prompt = input.systemPrompt;
+					return {
+						async run(_message, emit) {
+							emit({ kind: "text_delta", text: "ok" });
+						},
+					};
+				},
+				observability: noopObservability,
+			});
+			await harness.runTurn("which package manager for installs", () => undefined);
+			expect(prompt).toContain("## Memory");
+			expect(prompt).toContain("Prefer bun over npm for installs");
+			harness.close();
+		} finally {
+			if (prevHome === undefined) delete process.env.HARNESS_HOME;
+			else process.env.HARNESS_HOME = prevHome;
+			await rm(cwd, { recursive: true, force: true });
+			await rm(home, { recursive: true, force: true });
+		}
+	});
+
 	test("accumulates usage on the runtime", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "harness-spend-"));
 		try {

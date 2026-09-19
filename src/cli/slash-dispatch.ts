@@ -13,6 +13,9 @@ import {
 } from "../integrations/store.ts";
 import { type GeneratedMedia, generateImage, generateVideo } from "../media/openrouter-generate.ts";
 import { readMediaPrefs, writeMediaPrefs } from "../media/prefs.ts";
+import { isMemoryEnabled, writeMemoryPrefs } from "../memory/prefs.ts";
+import { formatMemoryList } from "../memory/prompt.ts";
+import { deleteFact, listFacts, matchFact, pinFact, unpinFact } from "../memory/store.ts";
 import type { HarnessRuntime } from "../runtime.ts";
 import { browseSkillCatalog } from "../skills/catalog.ts";
 import {
@@ -366,6 +369,43 @@ async function handleEval(harness: HarnessRuntime, arg: string): Promise<SlashOu
 	}
 }
 
+function memoryState(harness: HarnessRuntime) {
+	return {
+		enabled: isMemoryEnabled({ configEnabled: harness.config.memory?.enabled }),
+		facts: listFacts(harness.cwd),
+	};
+}
+
+async function handleMemory(harness: HarnessRuntime, arg: string): Promise<SlashOutcome> {
+	const body = arg.trim();
+	if (!body) return { kind: "text", text: formatMemoryList(memoryState(harness)) };
+	if (body === "on" || body === "off") {
+		writeMemoryPrefs({ enabled: body === "on" });
+		return { kind: "text", text: formatMemoryList(memoryState(harness)) };
+	}
+	const [action, ...rest] = body.split(/\s+/);
+	const target = rest.join(" ").trim();
+	if ((action === "delete" || action === "pin") && !target) {
+		return { kind: "text", text: `/memory ${action} <n>` };
+	}
+	if (action === "delete") {
+		const fact = matchFact(listFacts(harness.cwd), target);
+		if (!fact) return { kind: "text", text: `No memory matches ${target}.` };
+		deleteFact(harness.cwd, fact.id);
+		const unpinned = unpinFact(harness.cwd, fact, harness.config.instructionsFile);
+		if ("error" in unpinned) return { kind: "text", text: unpinned.error };
+		return { kind: "text", text: `Deleted ${fact.text}` };
+	}
+	if (action === "pin") {
+		const fact = matchFact(listFacts(harness.cwd), target);
+		if (!fact) return { kind: "text", text: `No memory matches ${target}.` };
+		const pinned = pinFact(harness.cwd, fact, harness.config.instructionsFile);
+		if ("error" in pinned) return { kind: "text", text: pinned.error };
+		return { kind: "text", text: `Pinned to ${pinned.path}` };
+	}
+	return { kind: "text", text: "/memory on · /memory off · /memory delete 1 · /memory pin 1" };
+}
+
 async function handleSettings(harness: HarnessRuntime, arg: string): Promise<SlashOutcome> {
 	const body = arg.trim();
 	if (!body || body === "key") {
@@ -406,6 +446,7 @@ const SLASH_HANDLERS: Record<string, SlashHandler> = {
 	transcribe: handleTranscribe,
 	resume: handleResume,
 	eval: handleEval,
+	memory: handleMemory,
 	settings: handleSettings,
 	exit: async () => ({ kind: "exit" }),
 	quit: async () => ({ kind: "exit" }),
