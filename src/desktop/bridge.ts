@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { mediaModelLabel } from "../cli/media-models.ts";
 import { HARNESS_MODELS, modelPickerItems } from "../cli/models.ts";
-import { cachedLiveTargetNames, loadLiveTargetNames } from "../cli/openrouter-live.ts";
+import {
+	cachedLiveTargetNames,
+	loadLiveTargetNames,
+	prettyLiveModelName,
+} from "../cli/openrouter-live.ts";
 import { cachedModalityModels } from "../cli/openrouter-modality.ts";
 import { sessionPickerItems } from "../cli/picker.ts";
 import { isHelpAlias } from "../cli/slash.ts";
@@ -230,17 +234,16 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
 
 function snapshot(harness: HarnessRuntime, busy: boolean, title: string): DesktopState {
 	const live = cachedLiveTargetNames();
-	const target = live.get(harness.modelId);
+	const target = prettyLiveModelName(live.get(harness.modelId) ?? "").trim();
 	const prefs = readMediaPrefs();
+	const label = modelLabel(harness.modelId);
 	return {
 		name: harness.config.name,
 		cwd: harness.cwd,
 		mode: harness.mode,
 		modelId: harness.modelId,
-		modelLabel: modelLabel(harness.modelId),
-		...(target && target.toLowerCase() !== modelLabel(harness.modelId).toLowerCase()
-			? { modelTarget: target }
-			: {}),
+		modelLabel: label,
+		...(target && target.toLowerCase() !== label.toLowerCase() ? { modelTarget: target } : {}),
 		imageModelId: prefs.imageModel,
 		imageModelLabel: mediaModelLabel(cachedModalityModels("image"), prefs.imageModel),
 		videoModelId: prefs.videoModel,

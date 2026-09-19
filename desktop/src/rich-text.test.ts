@@ -76,6 +76,32 @@ describe("splitRichText", () => {
 		]);
 	});
 
+	test("keeps Notion list copy and scheme-less URLs as links, not files", () => {
+		const listed = splitRichText(
+			"Pages:\n1. https://www.notion.so/workspace/Notes-abc123\n2. www.notion.so/Second-page\n3. notion.so/Third",
+		);
+		expect(listed.filter((part) => part.type === "file")).toEqual([]);
+		const links = listed.filter((part) => part.type === "link");
+		expect(links.map((part) => part.href)).toEqual([
+			"https://www.notion.so/workspace/Notes-abc123",
+			"https://www.notion.so/Second-page",
+			"https://notion.so/Third",
+		]);
+		expect(
+			splitRichText("1. www.notion.so/workspace/Notes-abc123").some((part) => part.type === "file"),
+		).toBe(false);
+		expect(
+			splitRichText("1. notion.so/workspace/Notes-abc123").some((part) => part.type === "file"),
+		).toBe(false);
+		const prose = splitRichText(
+			"Main page: CPH MARATHON 24\nURL: app.notion.com/p/53e6c2a14dfe45e5beb210a33cc8c3c4\n- Workout Schedule (planned training calendar)\n- RUNS (planned/logged runs)\n- Completed Runs",
+		);
+		expect(prose.filter((part) => part.type === "file")).toEqual([]);
+		expect(prose.some((part) => part.type === "link" && part.href.includes("53e6c2a14dfe"))).toBe(
+			true,
+		);
+	});
+
 	test("keeps an explicit home path clickable", () => {
 		const parts = splitRichText("Open ~/Documents/brief.md when you can.");
 		expect(parts.some((part) => part.type === "file" && part.path === "~/Documents/brief.md")).toBe(

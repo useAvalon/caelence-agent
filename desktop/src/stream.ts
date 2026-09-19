@@ -24,6 +24,7 @@ export type StreamLine =
 			count: number;
 			preview: string;
 			error?: string;
+			output?: string;
 	  }
 	| { key: string; type: "system"; text: string }
 	| { key: string; type: "error"; text: string }

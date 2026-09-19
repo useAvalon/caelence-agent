@@ -6,6 +6,8 @@ export type RichPart =
 
 const MD_LINK = /\[([^\]]+)\]\(((?:https?:\/\/|file:\/\/|~\/|\/)[^)\s]+)\)/gi;
 const BARE_URL = /https?:\/\/[^\s<>"'\])]+/gi;
+const WEB_REF =
+	/(?:^|[\s(])((?:www\.)[^\s<>"'\])]+|[a-z0-9][a-z0-9.-]*\.[a-z]{2,}\/[^\s<>"'\])]+)/gi;
 const DIR_REF =
 	/(?:^|[\s(])((?:~|\/(?:Users|home|Volumes|private|tmp|opt|var|Applications|Library))[^\s):,]*)/g;
 
@@ -61,9 +63,30 @@ export function joinLocalPath(dir: string, name: string): string {
 	return `${dir.replace(/\/+$/, "")}/${name}`;
 }
 
+export function looksLikeWebUrl(name: string): boolean {
+	const value = name.trim();
+	if (!value) return false;
+	if (/^https?:\/\//i.test(value)) return true;
+	if (/^www\./i.test(value)) return true;
+	return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:\/|\?|#)/i.test(value);
+}
+
+export function webHref(value: string): string {
+	const trimmed = value.trim();
+	if (/^https?:\/\//i.test(trimmed)) return trimmed;
+	return `https://${trimmed.replace(/^\/+/, "")}`;
+}
+
 export function looksLikeFilename(name: string): boolean {
 	if (!name || name.length > 240) return false;
-	if (isLocalFileHref(name) || name.includes("/")) return true;
+	if (looksLikeWebUrl(name)) return false;
+	if (isLocalFileHref(name) || name.startsWith("./") || name.startsWith("../")) return true;
+	if (name.includes("/")) {
+		if (/\s/.test(name)) return false;
+		if (!/^[.A-Za-z0-9_~-]+(?:\/[.A-Za-z0-9_~-]+)+$/.test(name)) return false;
+		const last = name.split("/").pop() ?? "";
+		return /\.[A-Za-z0-9]{1,10}$/.test(last);
+	}
 	return /\.[A-Za-z0-9]{1,10}$/.test(name);
 }
 
@@ -95,6 +118,15 @@ export function splitRichText(text: string): RichPart[] {
 			part: isImageUrl(href)
 				? { type: "image", src: href, alt: "Preview" }
 				: { type: "link", href, label: linkLabel(href) },
+		});
+	}
+
+	for (const hit of collectWebRefs(text)) {
+		if (overlaps(taken, hit.start, hit.end)) continue;
+		taken.push({
+			start: hit.start,
+			end: hit.end,
+			part: { type: "link", href: hit.href, label: hit.label },
 		});
 	}
 
@@ -135,6 +167,23 @@ function overlaps(
 	return taken.some((item) => start < item.end && end > item.start);
 }
 
+function collectWebRefs(
+	text: string,
+): Array<{ start: number; end: number; href: string; label: string }> {
+	const hits: Array<{ start: number; end: number; href: string; label: string }> = [];
+	for (const match of text.matchAll(WEB_REF)) {
+		const raw = match[1];
+		if (!raw || match.index === undefined) continue;
+		if (/^https?:\/\//i.test(raw)) continue;
+		const start = match.index + match[0].length - raw.length;
+		const token = trimTrailingPunct(raw);
+		if (!looksLikeWebUrl(token)) continue;
+		const href = webHref(token);
+		hits.push({ start, end: start + token.length, href, label: linkLabel(href) });
+	}
+	return hits;
+}
+
 function collectLocalFiles(
 	text: string,
 ): Array<{ start: number; end: number; path: string; label: string }> {
@@ -146,7 +195,7 @@ function collectLocalFiles(
 		if (!raw || match.index === undefined) continue;
 		const start = match.index + match[0].length - raw.length;
 		const path = trimTrailingPunct(raw).replace(/\/+$/, "") || raw;
-		if (path.length < 2) continue;
+		if (path.length < 2 || looksLikeWebUrl(path)) continue;
 		dirs.push({ start, path });
 		hits.push({ start, end: start + raw.length, path, label: path });
 	}

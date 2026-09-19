@@ -1,5 +1,6 @@
 /* Caelence primitives. Colour only through role aliases. Radii 4 / 8 / 12 / full.
-   Icon tiles use --icon-tile / --r-tile. Handles are always round. */
+   Buttons are rounded rects (12, compact 8). Icon tiles use --icon-tile / --r-tile.
+   Handles are always round. */
 
 .cel-btn {
 	display: inline-flex;
@@ -11,7 +12,7 @@
 	font-weight: 600;
 	line-height: 1;
 	padding: 13px 20px;
-	border-radius: var(--r-full);
+	border-radius: var(--r-lg);
 	border: 1px solid transparent;
 	cursor: pointer;
 	text-decoration: none;
@@ -73,11 +74,13 @@
 .cel-btn--sm {
 	font-size: 13px;
 	padding: 8px 14px;
+	border-radius: var(--r-md);
 }
 .cel-btn--compact {
 	font-size: 13px;
 	padding: 5px 10px;
 	gap: 6px;
+	border-radius: var(--r-md);
 }
 
 .cel-tile {
@@ -462,7 +465,7 @@
 }
 
 .cel-float {
-	box-shadow: 0 18px 40px -20px color-mix(in srgb, var(--ink) 40%, transparent);
+	box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--ink) 36%, transparent);
 }
 
 /* Hover tip. A floating layer, so the same shadow as menus is allowed.
