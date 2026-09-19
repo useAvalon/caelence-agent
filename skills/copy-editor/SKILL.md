@@ -2,10 +2,9 @@
 name: copy-editor
 description: >-
   Edits and writes product and marketing copy: clarity, specificity, voice,
-  UI state strings, and anti-AI-slop sweeps. Use when the user says copy
-  editor, fix the copy, remove AI-isms, anti-slop, CTA, error copy, empty
-  state, or after RMBC and Harry Dry. Two modes: write and edit. Any
-  category. Never invent proof. Not visual QA.
+  and anti-AI-slop sweeps. Use when the user says copy editor, fix the copy,
+  remove AI-isms, anti-slop, CTA, or after RMBC and Harry Dry. Two modes:
+  write and edit. Any category. Never invent proof. Not visual QA.
 ---
 
 # Copy editor
@@ -14,14 +13,17 @@ Adapted from [mblode copywriting](https://github.com/mblode/agent-skills)
 (MIT as stated for that skill). Ideas from George-Brothers Copywriter: swap
 test, `[VERIFY]` instead of invented numbers. Not a vendor of either repo.
 
-Router: copywriting. After copy-harry-dry. Lists:
-`references/anti-slop.md`, `references/ui-states.md` (read with
-`read_skill`, `file` set to that path).
+Router: copywriting. After copy-harry-dry. Always load `references/anti-slop.md`
+(`read_skill`, `file` set to that path).
 
 Sentence case. Oxford comma. Present tense. No exclamation marks.
 
 **Unproven claims:** omit, or `[VERIFY]` in a draft. Never a fake figure,
-testimonial, or metric. Shipped UI and HTML must not contain `[VERIFY]`.
+testimonial, or metric. Shipped HTML must not contain `[VERIFY]`.
+
+Product chrome (error, empty, button, settings) is mechanical: a verb that
+matches the state, one-sentence descriptions, errors that say what happened
+and what to do next. Do not treat lander or article body as UI chrome.
 
 ## Modes (do not ask)
 
@@ -36,7 +38,7 @@ Point edit: change only the named line plus connective tissue.
 
 1. Brief: page, goal, reader, core outcome. Mark inferred fields.
 2. Voice: this project's brief.
-3. Marketing: RMBC already chose the angle. UI state: load `ui-states.md`.
+3. Marketing or prose: RMBC already chose the angle.
 4. One strong draft.
 5. Harry Dry on body and proof.
 6. Verify: no banned word, no invented specific, every supplied fact kept.
@@ -60,6 +62,9 @@ Point edit: change only the named line plus connective tissue.
 7. Rewrite flagged lines. Cut hard. Do not add proof.
 8. Optional mechanical lint, if the draft is a file under the project:
    `python3` on this skill's `scripts/lint-copy.py`.
+
+`[STATE-COPY]` is for product chrome only. Do not flag lander body as UI
+state copy.
 
 Visual layout (kickers, equal cards) is `impeccable`, not this skill.
 

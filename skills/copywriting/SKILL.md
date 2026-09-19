@@ -35,7 +35,7 @@ RESEARCH        POSITIONING
 |---|---|---|
 | Sequence | copy-rmbc | Research, mechanism, brief, then copy. Facts from this project's brief only. |
 | Line | copy-harry-dry | Body and proof: visualize / falsify / ownable. Not a kill-switch on a hero epithet. |
-| Edit | copy-editor | Write vs edit. UI states. Sweeps. `[VERIFY]` or omit. |
+| Edit | copy-editor | Sweeps. `[VERIFY]` or omit. |
 
 **Invented proof is always illegal.** Never invent a number, testimonial, case
 study, customer name, star rating, or sample metric. Unproven claims: omit, or
@@ -57,7 +57,8 @@ Dry, then copy-editor). Do not flatten the pipeline into one prompt.
 
 ## When to skip a layer
 
-- **One UI string** (error, empty, button): copy-editor UI states only.
+- **One UI string** (error, empty, button): copy-editor only.
+- **Prose, lander, email, headline:** copy-editor as usual.
 - **One headline to polish:** Harry Dry on that line if it is proof; then copy-editor.
 - **Full lander from a facts brief:** whole pipeline in write mode. Facts stay locked. Wording is not. Restating the brief is a fail.
 
