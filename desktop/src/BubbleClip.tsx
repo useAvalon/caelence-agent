@@ -1,6 +1,6 @@
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { type ReactElement, type ReactNode, useLayoutEffect, useRef, useState } from "react";
-import { clipLineHeight, clipNeedsExpand, collapsedClipLimit } from "./clip.ts";
+import { clipLineHeight, clipNeedsExpand, collapsedClipLimit } from "./clip";
 
 export function BubbleClip(
 	props: Readonly<{

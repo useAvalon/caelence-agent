@@ -460,6 +460,19 @@ describe("desktop bridge", () => {
 			expect(await readFile(join(ctx.cwd, ".harness", "uploads", file ?? ""), "utf8")).toBe(
 				"from the composer",
 			);
+			const state = (await (
+				await fetch(`${ctx.ready.url}/state`, { headers: ctx.headers })
+			).json()) as { uploads: Array<{ rel: string }> };
+			const rel = state.uploads[0]?.rel ?? "";
+			expect(rel).toContain("note.txt");
+			const removed = await fetch(`${ctx.ready.url}/uploads/delete`, {
+				method: "POST",
+				headers: ctx.headers,
+				body: JSON.stringify({ rels: [rel] }),
+			});
+			expect(removed.ok).toBe(true);
+			const after = (await removed.json()) as { state: { uploads: unknown[] } };
+			expect(after.state.uploads).toEqual([]);
 		} finally {
 			await ctx.close();
 		}

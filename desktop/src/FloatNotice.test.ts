@@ -19,5 +19,17 @@ describe("FloatNotice", () => {
 		expect(html).toContain('aria-label="Dismiss"');
 		expect(html).toContain("<output");
 		expect(html).toContain("desk-notice");
+		expect(html).not.toContain("desk-notice--error");
+	});
+
+	test("marks error notices", () => {
+		const html = renderToStaticMarkup(
+			createElement(FloatNotice, {
+				text: "Could not save",
+				kind: "error",
+				onDismiss: () => undefined,
+			}),
+		);
+		expect(html).toContain("desk-notice--error");
 	});
 });
