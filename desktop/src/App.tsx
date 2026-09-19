@@ -1,6 +1,8 @@
+import { ArrowUDownLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowUDownLeft";
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUpRight";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+import { CircleIcon } from "@phosphor-icons/react/dist/csr/Circle";
 import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/csr/FolderSimple";
 import { GearIcon } from "@phosphor-icons/react/dist/csr/Gear";
@@ -92,17 +94,22 @@ import { FloatNotice } from "./FloatNotice";
 import { integrationMatches } from "./integration-search";
 import { LogoMark } from "./LogoMark";
 import { McpPanel } from "./McpPanel";
+import { PipelineTrack } from "./PipelineTrack";
 import { PlatformPane } from "./PlatformPane";
 import { pickerKeyAction, pickerStartIndex, stepIndex } from "./picker-nav";
+import { pipelineProgress } from "./pipeline";
 import { formatPlatformOutput, isPlatformTool } from "./platform";
 import {
 	enqueueMessage,
+	promoteQueued,
 	type QueuedMessage,
 	removeQueued,
 	setQueuedText,
 	updateQueued,
 } from "./queue";
-import { canvaViewUrl, splitRichText } from "./rich-text";
+import { ReplySources } from "./ReplySources";
+import { canvaViewUrl, looksLikeWebUrl, splitRichText, webHref } from "./rich-text";
+import { ShimmerPhrase } from "./ShimmerPhrase";
 import { SkillsPanel } from "./SkillsPanel";
 import { clampMenuPosition } from "./session-menu";
 import {
@@ -116,6 +123,7 @@ import {
 import {
 	type FoldEntry,
 	groupTranscriptLines,
+	liveStatusPhrases,
 	type ToolLine,
 	thoughtSummary,
 	thoughtTools,
@@ -463,9 +471,10 @@ export function App(): React.ReactElement {
 		suffix?: string;
 	} | null>(null);
 	const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
-	const [integrations, setIntegrations] = useState<PublicIntegration[]>([]);
+	const [queueOpen, setQueueOpen] = useState(true);
 	const [notice, setNotice] = useState<{ text: string; id: number } | null>(null);
 	const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+	const [integrations, setIntegrations] = useState<PublicIntegration[]>([]);
 	const [fileDrag, setFileDrag] = useState(false);
 	const transcriptRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -549,9 +558,17 @@ export function App(): React.ReactElement {
 
 	useEffect(() => {
 		if (!bridge) return;
+		let cancelled = false;
 		void getIntegrations(bridge)
-			.then((result) => setIntegrations(result.items))
-			.catch(() => undefined);
+			.then((result) => {
+				if (!cancelled) setIntegrations(result.items);
+			})
+			.catch(() => {
+				if (!cancelled) setIntegrations([]);
+			});
+		return () => {
+			cancelled = true;
+		};
 	}, [bridge]);
 
 	useEffect(() => {
@@ -928,6 +945,7 @@ export function App(): React.ReactElement {
 		setView("chat");
 		if (status === "running" || status === "approval" || sendingRef.current) {
 			setQueueSync(enqueueMessage(queueRef.current, toSend, `q-${Date.now()}`, pendingFiles));
+			setQueueOpen(true);
 			return;
 		}
 		await sendTurn(toSend, undefined, pendingFiles);
@@ -943,6 +961,20 @@ export function App(): React.ReactElement {
 		status,
 		takeAttachments,
 	]);
+
+	const sendQueuedNow = useCallback(
+		async (id: string) => {
+			const item = queueRef.current.find((row) => row.id === id);
+			if (!item || !bridge) return;
+			if (status === "running" || status === "approval" || sendingRef.current) {
+				setQueueSync(promoteQueued(queueRef.current, id));
+				return;
+			}
+			setQueueSync(removeQueued(queueRef.current, id));
+			await sendTurn(item.text, undefined, item.attachments ?? []);
+		},
+		[bridge, sendTurn, setQueueSync, status],
+	);
 
 	const stop = useCallback(async () => {
 		if (!bridge) return;
@@ -1549,6 +1581,7 @@ export function App(): React.ReactElement {
 											<TranscriptLine
 												key={line.key}
 												line={line}
+												lines={lines}
 												bridge={bridge}
 												integrations={integrations}
 												editing={
@@ -1667,64 +1700,25 @@ export function App(): React.ReactElement {
 						<footer className="desk-composer">
 							{fileDrag ? <p className="desk-composer__drop">Drop files to attach</p> : null}
 							{queue.length > 0 ? (
-								<ul className="desk-queue" aria-label="Queued messages">
-									{queue.map((item) => (
-										<li key={item.id} className="desk-queue-item">
-											{editingQueuedId === item.id ? (
-												<textarea
-													className="cel-input desk-compose-input"
-													rows={2}
-													value={item.text}
-													aria-label="Edit queued message"
-													onChange={(event) =>
-														setQueueSync(
-															setQueuedText(queueRef.current, item.id, event.target.value),
-														)
-													}
-													onKeyDown={(event) => {
-														if (event.key === "Enter" && !event.shiftKey) {
-															event.preventDefault();
-															setQueueSync(updateQueued(queueRef.current, item.id, item.text));
-															setEditingQueuedId(null);
-														}
-														if (event.key === "Escape") {
-															event.preventDefault();
-															setEditingQueuedId(null);
-														}
-													}}
-													onBlur={() => {
-														setQueueSync(updateQueued(queueRef.current, item.id, item.text));
-														setEditingQueuedId(null);
-													}}
-												/>
-											) : (
-												<div className="desk-queue-copy">
-													<AttachmentThumbs items={item.attachments ?? []} />
-													{item.text ? (
-														<button
-															type="button"
-															className="desk-queue-text"
-															onClick={() => setEditingQueuedId(item.id)}
-														>
-															{item.text}
-														</button>
-													) : null}
-												</div>
-											)}
-											<button
-												type="button"
-												className="cel-btn cel-btn--quiet cel-btn--compact"
-												aria-label="Remove from queue"
-												onClick={() => {
-													if (editingQueuedId === item.id) setEditingQueuedId(null);
-													setQueueSync(removeQueued(queueRef.current, item.id));
-												}}
-											>
-												<XIcon size={16} weight="regular" />
-											</button>
-										</li>
-									))}
-								</ul>
+								<QueuePanel
+									queue={queue}
+									open={queueOpen}
+									editingId={editingQueuedId}
+									onToggle={() => setQueueOpen((current) => !current)}
+									onEdit={setEditingQueuedId}
+									onChangeText={(id, text) =>
+										setQueueSync(setQueuedText(queueRef.current, id, text))
+									}
+									onCommitText={(id, text) => {
+										setQueueSync(updateQueued(queueRef.current, id, text));
+										setEditingQueuedId(null);
+									}}
+									onSendNow={(id) => void sendQueuedNow(id)}
+									onRemove={(id) => {
+										if (editingQueuedId === id) setEditingQueuedId(null);
+										setQueueSync(removeQueued(queueRef.current, id));
+									}}
+								/>
 							) : null}
 							{mediaModels.length > 0 && mediaOpen ? (
 								<section className="desk-composer__meta">
@@ -2369,6 +2363,121 @@ function SettingsPanel(
 	);
 }
 
+function QueuePanel(
+	props: Readonly<{
+		queue: QueuedMessage[];
+		open: boolean;
+		editingId: string | null;
+		onToggle: () => void;
+		onEdit: (id: string | null) => void;
+		onChangeText: (id: string, text: string) => void;
+		onCommitText: (id: string, text: string) => void;
+		onSendNow: (id: string) => void;
+		onRemove: (id: string) => void;
+	}>,
+): React.ReactElement {
+	const editRef = useRef<HTMLTextAreaElement>(null);
+	const count = props.queue.length;
+	const title = count === 1 ? "1 queued message" : `${count} queued messages`;
+	useEffect(() => {
+		if (props.editingId) editRef.current?.focus();
+	}, [props.editingId]);
+	return (
+		<section className="desk-queue">
+			<button
+				type="button"
+				className="desk-queue__head"
+				aria-expanded={props.open}
+				onClick={props.onToggle}
+			>
+				<CaretDownIcon className="desk-queue__caret" size={12} weight="bold" aria-hidden="true" />
+				{title}
+			</button>
+			{props.open ? (
+				<ul className="desk-queue__list">
+					{props.queue.map((item) => {
+						const editing = props.editingId === item.id;
+						return (
+							<li key={item.id} className={`desk-queue-item${editing ? " is-editing" : ""}`}>
+								<button
+									type="button"
+									className="desk-queue__pick"
+									aria-label="Send now"
+									onClick={() => props.onSendNow(item.id)}
+								>
+									<CircleIcon size={16} weight="regular" aria-hidden="true" />
+								</button>
+								{editing ? (
+									<textarea
+										ref={editRef}
+										className="cel-input desk-compose-input desk-queue__input"
+										rows={2}
+										value={item.text}
+										aria-label="Edit queued message"
+										onChange={(event) => props.onChangeText(item.id, event.target.value)}
+										onKeyDown={(event) => {
+											if (event.key === "Enter" && !event.shiftKey) {
+												event.preventDefault();
+												props.onCommitText(item.id, item.text);
+											}
+											if (event.key === "Escape") {
+												event.preventDefault();
+												props.onEdit(null);
+											}
+										}}
+										onBlur={() => props.onCommitText(item.id, item.text)}
+									/>
+								) : (
+									<div className="desk-queue-copy">
+										<AttachmentThumbs items={item.attachments ?? []} />
+										{item.text ? (
+											<button
+												type="button"
+												className="desk-queue-text"
+												onClick={() => props.onEdit(item.id)}
+											>
+												{item.text}
+											</button>
+										) : null}
+									</div>
+								)}
+								{editing ? null : (
+									<div className="desk-queue__actions">
+										<button
+											type="button"
+											className="desk-queue__act"
+											onClick={() => props.onSendNow(item.id)}
+										>
+											Send now
+											<ArrowUDownLeftIcon size={12} weight="bold" aria-hidden="true" />
+										</button>
+										<button
+											type="button"
+											className="desk-queue__icon"
+											aria-label="Edit queued message"
+											onClick={() => props.onEdit(item.id)}
+										>
+											<PencilSimpleIcon size={14} weight="regular" />
+										</button>
+										<button
+											type="button"
+											className="desk-queue__icon"
+											aria-label="Remove from queue"
+											onClick={() => props.onRemove(item.id)}
+										>
+											<TrashIcon size={14} weight="regular" />
+										</button>
+									</div>
+								)}
+							</li>
+						);
+					})}
+				</ul>
+			) : null}
+		</section>
+	);
+}
+
 function ThoughtFold(
 	props: Readonly<{
 		entries: FoldEntry[];
@@ -2376,32 +2485,33 @@ function ThoughtFold(
 		warmupSeed?: number;
 	}>,
 ): React.ReactElement {
-	const { entries, live, warmupSeed } = props;
+	const { entries, live } = props;
 	const tools = thoughtTools(entries);
 	const summary = thoughtSummary(tools, live, {
 		warmup: entries.length === 0,
-		seed: warmupSeed ?? 0,
+		seed: props.warmupSeed ?? 0,
 	});
+	const phrases = live ? liveStatusPhrases(tools, entries.length === 0) : [summary.headline];
+	const pipe = live ? pipelineProgress(tools) : undefined;
 	const hasBody = entries.some((entry) =>
 		entry.type === "note" ? entry.text.trim().length > 0 : true,
 	);
+	const headline = (
+		<span className="desk-thought__copy">
+			<span className="desk-thought__headline">
+				<ShimmerPhrase phrases={phrases} live={live} tone={pipe ? "pipe" : undefined} />
+			</span>
+			{pipe ? <PipelineTrack steps={pipe.steps} /> : null}
+		</span>
+	);
 	if (!hasBody) {
 		return (
-			<p className="desk-thought desk-thought--plain">
-				<span className="desk-thought__headline">{summary.headline}</span>
-			</p>
+			<p className={`desk-thought desk-thought--plain${pipe ? " is-pipe" : ""}`}>{headline}</p>
 		);
 	}
 	return (
-		<details className="desk-thought">
-			<summary>
-				<span className="desk-thought__copy">
-					<span className="desk-thought__headline">{summary.headline}</span>
-					{live && summary.activity ? (
-						<span className="desk-thought__activity">{summary.activity}</span>
-					) : null}
-				</span>
-			</summary>
+		<details className={`desk-thought${pipe ? " is-pipe" : ""}`}>
+			<summary>{headline}</summary>
 			<div className="desk-thought__body">
 				{entries.map((entry) => {
 					if (entry.type === "note") {
@@ -2525,7 +2635,9 @@ function UserTranscriptLine(
 function TranscriptLine(
 	props: Readonly<{
 		line: StreamLine;
+		lines: StreamLine[];
 		bridge: BridgeClient | null;
+		integrations: PublicIntegration[];
 		editing?: string | null;
 		onStartEdit?: () => void;
 		onEditChange?: (text: string) => void;
@@ -2533,7 +2645,6 @@ function TranscriptLine(
 		onEditCancel?: () => void;
 		onOpenUrl?: (url: string) => void;
 		onOpenFile?: (path: string, reveal: boolean) => void;
-		integrations?: PublicIntegration[];
 	}>,
 ): React.ReactElement {
 	const { line, bridge, onOpenUrl, onOpenFile } = props;
@@ -2560,6 +2671,13 @@ function TranscriptLine(
 						onOpenUrl={onOpenUrl}
 						onOpenFile={onOpenFile}
 					/>
+					<ReplySources
+						lines={props.lines}
+						assistantKey={line.key}
+						bridge={bridge}
+						onOpenUrl={onOpenUrl}
+						onOpenFile={onOpenFile}
+					/>
 				</div>
 			</article>
 		);
@@ -2568,7 +2686,7 @@ function TranscriptLine(
 		if (isPlatformTool(line.name)) {
 			const body = formatPlatformOutput(line.output ?? "");
 			return (
-				<PlatformPane line={line} integrations={props.integrations ?? []}>
+				<PlatformPane line={line} integrations={props.integrations}>
 					{body ? (
 						<RichBody text={body} bridge={bridge} onOpenUrl={onOpenUrl} onOpenFile={onOpenFile} />
 					) : null}
@@ -2650,6 +2768,7 @@ function RichBody(
 							path={part.path}
 							label={part.label}
 							onOpenFile={props.onOpenFile}
+							onOpenUrl={props.onOpenUrl}
 						/>
 					);
 				}
@@ -2689,8 +2808,14 @@ function FileLink(
 		path: string;
 		label: string;
 		onOpenFile?: (path: string, reveal: boolean) => void;
+		onOpenUrl?: (url: string) => void;
 	}>,
 ): React.ReactElement {
+	if (looksLikeWebUrl(props.path)) {
+		return (
+			<ExternalLink href={webHref(props.path)} label={props.label} onOpenUrl={props.onOpenUrl} />
+		);
+	}
 	return (
 		<span className="desk-file">
 			<button

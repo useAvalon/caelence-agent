@@ -38,3 +38,11 @@ export function shiftQueue(queue: QueuedMessage[]): {
 	const [next, ...rest] = queue;
 	return next ? { next, rest } : { rest };
 }
+
+export function promoteQueued(queue: QueuedMessage[], id: string): QueuedMessage[] {
+	const index = queue.findIndex((item) => item.id === id);
+	if (index <= 0) return queue;
+	const item = queue[index];
+	if (!item) return queue;
+	return [item, ...queue.filter((row) => row.id !== id)];
+}

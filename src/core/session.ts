@@ -17,6 +17,7 @@ export type SessionMessage =
 			status: "ok" | "fail";
 			preview: string;
 			error?: string;
+			output?: string;
 	  }
 	| {
 			kind: "compaction_checkpoint";
@@ -36,6 +37,7 @@ export type ChatTranscriptLine =
 			status: "ok" | "fail";
 			preview: string;
 			error?: string;
+			output?: string;
 	  };
 
 export interface Session {
@@ -126,6 +128,7 @@ export function sessionTranscript(session: Session): ChatTranscriptLine[] {
 				status: message.status,
 				preview: message.preview,
 				...(message.error ? { error: message.error } : {}),
+				...(message.output ? { output: message.output } : {}),
 			});
 		}
 	}

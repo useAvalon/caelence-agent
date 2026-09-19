@@ -14,4 +14,16 @@ describe("tool labels", () => {
 		expect(toolLabel("exec", { command: "bun test" })).toBe("Running: bun test");
 		expect(toolLabel("web_search")).toBe("Searching the web");
 	});
+
+	test("uses an active phrase for a lone tool name", () => {
+		expect(toolLabel("task")).toBe("Handling task");
+		expect(toolLabel("mystery")).toBe("Using mystery");
+	});
+
+	test("names the skill on read_skill and task", () => {
+		expect(toolLabel("read_skill", { name: "copy-harry-dry" })).toBe("Reading Harry Dry");
+		expect(toolLabel("task", { label: "copy-edit", skills: ["copy-editor"] })).toBe(
+			"Handling copy-edit",
+		);
+	});
 });

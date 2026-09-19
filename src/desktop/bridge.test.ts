@@ -269,6 +269,57 @@ describe("desktop bridge", () => {
 		}
 	});
 
+	test("previews a project file and rejects escape", async () => {
+		const ctx = await withBridge();
+		try {
+			await writeFile(join(ctx.cwd, "note.txt"), "preview me");
+			const ok = await fetch(`${ctx.ready.url}/file-preview?path=note.txt`, {
+				headers: ctx.headers,
+			});
+			expect(ok.ok).toBe(true);
+			const body = (await ok.json()) as { text?: string; path?: string; kind?: string };
+			expect(body.path).toBe("note.txt");
+			expect(body.text).toBe("preview me");
+			expect(body.kind).toBe("text");
+			const blocked = await fetch(`${ctx.ready.url}/file-preview?path=../secret`, {
+				headers: ctx.headers,
+			});
+			expect(blocked.status).toBe(400);
+		} finally {
+			await ctx.close();
+		}
+	});
+
+	test("previews images as bytes and rejects escape", async () => {
+		const ctx = await withBridge();
+		try {
+			const png = Buffer.from(
+				"89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
+				"hex",
+			);
+			await writeFile(join(ctx.cwd, "dot.png"), png);
+			const meta = await fetch(`${ctx.ready.url}/file-preview?path=dot.png`, {
+				headers: ctx.headers,
+			});
+			expect(meta.ok).toBe(true);
+			const body = (await meta.json()) as { kind?: string; mime?: string };
+			expect(body.kind).toBe("image");
+			expect(body.mime).toBe("image/png");
+			const bytes = await fetch(`${ctx.ready.url}/file-bytes?path=dot.png`, {
+				headers: ctx.headers,
+			});
+			expect(bytes.ok).toBe(true);
+			expect(bytes.headers.get("content-type")).toBe("image/png");
+			expect(Buffer.from(await bytes.arrayBuffer()).equals(png)).toBe(true);
+			const blocked = await fetch(`${ctx.ready.url}/file-bytes?path=../secret.png`, {
+				headers: ctx.headers,
+			});
+			expect(blocked.status).toBe(400);
+		} finally {
+			await ctx.close();
+		}
+	});
+
 	test("rejects a missing local path", async () => {
 		const ctx = await withBridge();
 		try {

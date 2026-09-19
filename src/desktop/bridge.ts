@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
 import { mediaModelLabel } from "../cli/media-models.ts";
 import { HARNESS_MODELS, modelPickerItems } from "../cli/models.ts";
 import {
@@ -49,8 +51,10 @@ import {
 	searchSkillCatalog,
 	skillNameFromCatalogId,
 } from "../skills/registry.ts";
+import { resolveUnderCwd, toProjectRel } from "../tools/paths.ts";
 import { openResolvedPath, resolveLocalPath } from "./open-local.ts";
 import { readPreviewCache, writePreviewCache } from "./preview-cache.ts";
+import { filePreviewKind, filePreviewMime } from "./preview-kind.ts";
 import { applyStoredOpenRouterKey, maskSecret, writeOpenRouterKey } from "./secrets.ts";
 import { composeUploadMessage, listUploads, parseIncomingUploads, saveUploads } from "./uploads.ts";
 
@@ -97,6 +101,23 @@ const CORS_HEADERS = {
 	"access-control-allow-headers": "authorization, content-type",
 	"access-control-allow-methods": "GET, POST, OPTIONS",
 };
+
+function resolvePreviewPath(cwd: string, raw: string): string | undefined {
+	const trimmed = raw.trim();
+	if (!trimmed) return undefined;
+	try {
+		const abs =
+			!isAbsolute(trimmed) && !trimmed.startsWith("~") && !trimmed.startsWith("file://")
+				? resolveUnderCwd(cwd, trimmed)
+				: resolveLocalPath(trimmed, cwd);
+		if (!abs) return undefined;
+		const rel = relative(resolve(cwd), abs);
+		if (rel.startsWith("..") || isAbsolute(rel)) return undefined;
+		return abs;
+	} catch {
+		return undefined;
+	}
+}
 
 function modelLabel(id: string): string {
 	return HARNESS_MODELS.find((model) => model.id === id)?.label ?? id;
@@ -515,6 +536,58 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		}
 	};
 
+	const route_get_file_preview = async (_req: Request, url: URL): Promise<Response> => {
+		const abs = resolvePreviewPath(options.cwd, url.searchParams.get("path") ?? "");
+		if (!abs) return json({ error: "File is missing." }, 400);
+		try {
+			const info = await stat(abs);
+			if (!info.isFile()) return json({ error: "Not a file." }, 400);
+			const path = toProjectRel(options.cwd, abs);
+			const kind = filePreviewKind(abs);
+			if (kind === "image") {
+				return json({
+					path,
+					kind,
+					mime: filePreviewMime(abs) ?? "application/octet-stream",
+				});
+			}
+			const buf = await readFile(abs);
+			if (buf.includes(0)) return json({ error: "Not a text file." }, 400);
+			const text = buf.toString("utf8");
+			const max = 200_000;
+			const truncated = text.length > max;
+			return json({
+				path,
+				kind,
+				text: truncated ? `${text.slice(0, max)}\n…` : text,
+				truncated,
+			});
+		} catch (err) {
+			return json({ error: errorMessage(err) || "Could not read the file." }, 400);
+		}
+	};
+
+	const route_get_file_bytes = async (_req: Request, url: URL): Promise<Response> => {
+		const abs = resolvePreviewPath(options.cwd, url.searchParams.get("path") ?? "");
+		if (!abs) return json({ error: "File is missing." }, 400);
+		if (filePreviewKind(abs) !== "image") return json({ error: "Not an image." }, 400);
+		try {
+			const info = await stat(abs);
+			if (!info.isFile()) return json({ error: "Not a file." }, 400);
+			if (info.size > 8_000_000) return json({ error: "Image is too large." }, 400);
+			const buf = await readFile(abs);
+			return new Response(buf, {
+				headers: {
+					"content-type": filePreviewMime(abs) ?? "application/octet-stream",
+					"cache-control": "private, max-age=60",
+					...CORS_HEADERS,
+				},
+			});
+		} catch (err) {
+			return json({ error: errorMessage(err) || "Could not read the file." }, 400);
+		}
+	};
+
 	const route_post_embed = async (req: Request, _url: URL): Promise<Response> => {
 		const body = await readJson(req);
 		const href = publicHttpHref(typeof body.url === "string" ? body.url : "");
@@ -844,6 +917,8 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		"POST /skills/remove": route_post_skills_remove,
 		"POST /open": route_post_open,
 		"POST /open-path": route_post_open_path,
+		"GET /file-preview": route_get_file_preview,
+		"GET /file-bytes": route_get_file_bytes,
 		"POST /embed": route_post_embed,
 		"GET /embed": route_get_embed,
 		"POST /transcribe": route_post_transcribe,
