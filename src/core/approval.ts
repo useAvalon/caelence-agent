@@ -20,6 +20,13 @@ export function isFileWriteTool(toolName: string): boolean {
 	return toolName === "edit_file" || toolName === "write_file";
 }
 
+export function isUploadEditRequest(req: ApprovalRequest): boolean {
+	return (
+		isFileWriteTool(req.toolName) &&
+		typeof req.input.originalPath === "string" &&
+		req.input.originalPath.trim().length > 0
+	);
+}
 /** Host-side denylist — local exec is the machine, not a sandbox. */
 export const DESTRUCTIVE_COMMAND_PATTERNS: readonly RegExp[] = [
 	/\bsudo\b/,
@@ -57,6 +64,9 @@ export interface ExecApprovalGateDeps {
 	/** Optional event sink so the TUI can show the permission card. */
 	emit?: AgentEventEmitter;
 	alwaysAllow?: Set<string>;
+	resolveUploadEdit?: (
+		path: string,
+	) => { rel: string; sourcePath: string; name: string } | undefined;
 }
 
 async function promptAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Promise<boolean> {
@@ -74,6 +84,16 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 	const always = deps.alwaysAllow ?? new Set<string>();
 	return {
 		async request(req) {
+			if (isFileWriteTool(req.toolName) && deps.resolveUploadEdit) {
+				const path = typeof req.input.path === "string" ? req.input.path : "";
+				const hit = deps.resolveUploadEdit(path);
+				if (hit) {
+					req.input.copyPath = hit.rel;
+					req.input.originalPath = hit.sourcePath;
+					req.input.fileName = hit.name;
+					return promptAsk(deps, req);
+				}
+			}
 			if (isFileWriteTool(req.toolName)) {
 				if (always.has("write_file") || always.has("edit_file") || always.has(req.toolName)) {
 					return true;

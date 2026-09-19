@@ -68,4 +68,25 @@ describe("local tools", () => {
 			await rm(cwd, { recursive: true, force: true });
 		}
 	});
+
+	test("can write an uploaded original outside cwd when allowlisted", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-tools-"));
+		const outside = await mkdtemp(join(tmpdir(), "harness-orig-"));
+		try {
+			const original = join(outside, "brief.md");
+			await Bun.write(original, "hello");
+			const mcp = createLocalTools({ cwd, extraWriteAbsolutes: () => [original] });
+			const written = await mcp.callTool("write_file", { path: original, content: "edited\n" });
+			expect(written.isError).toBeFalsy();
+			expect(await readFile(original, "utf8")).toBe("edited\n");
+			const blocked = await mcp.callTool("write_file", {
+				path: join(outside, "other.md"),
+				content: "nope",
+			});
+			expect(blocked.isError).toBe(true);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	});
 });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	attachmentKind,
+	createAttachment,
 	droppedPaths,
 	fileExtension,
 	filesFromTransfer,
@@ -32,6 +33,7 @@ describe("composer files", () => {
 		const transfer = { files: [file] } as unknown as DataTransfer;
 		expect(filesFromTransfer(transfer).map((item) => item.name)).toEqual(["a.txt"]);
 		expect(droppedPaths(transfer)).toEqual(["/tmp/a.txt"]);
+		expect(createAttachment(file).sourcePath).toBe("/tmp/a.txt");
 	});
 
 	test("merges unique files and rejects oversized extras", () => {

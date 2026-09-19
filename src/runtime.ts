@@ -37,6 +37,7 @@ import {
 	createConstructAgent,
 } from "./core/strands.ts";
 import { addUsage, type TokenUsage } from "./core/usage.ts";
+import { listUploadOriginals, matchUploadEdit } from "./desktop/uploads.ts";
 import { type ChatFn, createOpenRouterChat } from "./evals/runner.ts";
 import { buildRemoteMcpTools } from "./integrations/remote-mcp.ts";
 import { linkedMcpSources } from "./integrations/store.ts";
@@ -172,7 +173,10 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		});
 	let systemPrompt = composePrompt(mode);
 	const store = createFileSessionStore(cwd);
-	const local = createLocalTools({ cwd });
+	const local = createLocalTools({
+		cwd,
+		extraWriteAbsolutes: () => listUploadOriginals(cwd),
+	});
 	const todos = createMemoryTodoStore();
 	const hooks = createHookRunner({ cwd, hooks: config.hooks });
 	void hooks.sessionStart();
@@ -447,6 +451,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				policy,
 				alwaysAllow,
 				emit,
+				resolveUploadEdit: (path) => matchUploadEdit(cwd, path),
 				ask: async (req) => {
 					if (turnOptions?.approvalAsk) return turnOptions.approvalAsk(req);
 					if (policy === "prompt") return false;

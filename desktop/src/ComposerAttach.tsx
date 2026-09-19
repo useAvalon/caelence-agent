@@ -16,7 +16,7 @@ export function AttachmentThumbs(
 			<ul className="desk-attach-previews" aria-label="Attached files">
 				{props.items.map((item, index) => (
 					<li key={item.id ?? `${item.name}-${index}`} className="desk-attach-preview">
-						<ChatPreview name={item.name} kind={item.kind} previewUrl={item.previewUrl} />
+						<ChatPreview name={item.name} />
 					</li>
 				))}
 			</ul>
@@ -43,31 +43,7 @@ export function AttachmentThumbs(
 	);
 }
 
-function ChatPreview(
-	props: Readonly<{
-		name: string;
-		kind: ComposerFileKind;
-		previewUrl?: string;
-	}>,
-): React.ReactElement {
-	if (props.kind === "image" && props.previewUrl) {
-		return (
-			<>
-				<img className="desk-preview desk-preview--img" src={props.previewUrl} alt={props.name} />
-				<p className="desk-line__caption">{props.name}</p>
-			</>
-		);
-	}
-	if (props.kind === "video" && props.previewUrl) {
-		return (
-			<>
-				<video className="desk-preview desk-preview--img" controls src={props.previewUrl}>
-					<track kind="captions" srcLang="en" label="Captions" src="data:text/vtt,WEBVTT" />
-				</video>
-				<p className="desk-line__caption">{props.name}</p>
-			</>
-		);
-	}
+function ChatPreview(props: Readonly<{ name: string }>): React.ReactElement {
 	return (
 		<span className="desk-attach-file">
 			<FileGlyph size={16} weight="regular" aria-hidden="true" />

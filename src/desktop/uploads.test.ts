@@ -5,6 +5,8 @@ import { join } from "node:path";
 import {
 	composeUploadMessage,
 	isTextUpload,
+	listUploads,
+	matchUploadEdit,
 	parseIncomingUploads,
 	safeUploadName,
 	saveUploads,
@@ -20,6 +22,11 @@ describe("uploads", () => {
 				"nope",
 			]),
 		).toEqual([{ name: "a.txt", mime: "text/plain", data: "YQ==" }]);
+		expect(
+			parseIncomingUploads([
+				{ name: "cv.md", mime: "text/markdown", data: "YQ==", sourcePath: "/Users/mads/cv.md" },
+			])[0]?.sourcePath,
+		).toBe("/Users/mads/cv.md");
 	});
 
 	test("treats source and markdown as text", () => {
@@ -50,6 +57,33 @@ describe("uploads", () => {
 			expect(composeUploadMessage("look", saved)).toContain(saved[0]?.rel ?? "");
 			expect(composeUploadMessage("look", saved)).toContain("```\nhello\n```");
 			expect(composeUploadMessage("", saved)).toContain(saved[1]?.rel ?? "");
+			expect(listUploads(cwd).map((item) => item.name)).toEqual(["shot.png", "note.txt"]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("keeps the original path and matches it for edit prompts", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-uploads-"));
+		const original = join(cwd, "source.md");
+		try {
+			await Bun.write(original, "draft");
+			const saved = saveUploads(cwd, [
+				{
+					name: "source.md",
+					mime: "text/markdown",
+					data: Buffer.from("draft").toString("base64"),
+					sourcePath: original,
+				},
+			]);
+			expect(saved[0]?.sourcePath).toBe(original);
+			expect(composeUploadMessage("edit", saved)).toContain("Original:");
+			expect(matchUploadEdit(cwd, saved[0]?.rel ?? "")).toEqual({
+				rel: saved[0]?.rel ?? "",
+				sourcePath: original,
+				name: "source.md",
+			});
+			expect(matchUploadEdit(cwd, original)?.rel).toBe(saved[0]?.rel);
 		} finally {
 			await rm(cwd, { recursive: true, force: true });
 		}
