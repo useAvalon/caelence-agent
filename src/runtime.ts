@@ -40,6 +40,7 @@ import { addUsage, type TokenUsage } from "./core/usage.ts";
 import { type ChatFn, createOpenRouterChat } from "./evals/runner.ts";
 import { buildRemoteMcpTools } from "./integrations/remote-mcp.ts";
 import { linkedMcpSources } from "./integrations/store.ts";
+import { listUserMcpServers, userMcpToolPrefix } from "./mcp/user-servers.ts";
 import { createObservability } from "./observability/create.ts";
 import { noopObservability } from "./observability/noop.ts";
 import { harnessPromptRecords, syncPrompts } from "./observability/prompts.ts";
@@ -105,6 +106,7 @@ export interface HarnessRuntime {
 	compact(): Promise<boolean>;
 	reloadSkills(): Skill[];
 	reloadIntegrations(): Promise<void>;
+	reloadExtraMcp(): Promise<void>;
 	integrationIds(): string[];
 	authorSkill(name: string, brief: string): Promise<{ rel: string } | { error: string }>;
 	findSkills(query: string): Promise<string>;
@@ -174,8 +176,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	const todos = createMemoryTodoStore();
 	const hooks = createHookRunner({ cwd, hooks: config.hooks });
 	void hooks.sessionStart();
-	const closers: Array<() => void> = [];
 	const extra: McpToolDefinition[] = [...(options.extraTools ?? [])];
+	let extraMcpTools: McpToolDefinition[] = [];
+	let extraMcpClosers: Array<() => void> = [];
 	let integrationTools: McpToolDefinition[] = [];
 	const shouldLoadIntegrations = options.loadIntegrations ?? !options.provider;
 	const reloadIntegrations = async (): Promise<void> => {
@@ -185,16 +188,53 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		}
 		integrationTools = await buildRemoteMcpTools({ sources: linkedMcpSources() });
 	};
-	await reloadIntegrations();
-	for (const mcp of config.mcp) {
-		try {
-			const loaded = await loadStdioMcpTools({ ...mcp, cwd });
-			extra.push(...loaded.tools);
-			closers.push(loaded.close);
-		} catch {
-			// fail-soft: missing extra MCP must not block the REPL
+	const reloadExtraMcp = async (): Promise<void> => {
+		const nextTools: McpToolDefinition[] = [];
+		const nextClosers: Array<() => void> = [];
+		for (const mcp of config.mcp) {
+			try {
+				const loaded = await loadStdioMcpTools({ ...mcp, cwd });
+				nextTools.push(...loaded.tools);
+				nextClosers.push(loaded.close);
+			} catch {
+				// fail-soft: missing extra MCP must not block the REPL
+			}
 		}
-	}
+		for (const server of listUserMcpServers(cwd)) {
+			try {
+				if (server.kind === "stdio" && server.command) {
+					const loaded = await loadStdioMcpTools({
+						command: server.command,
+						args: server.args,
+						env: server.env,
+						cwd,
+						namePrefix: userMcpToolPrefix(server.id),
+					});
+					nextTools.push(...loaded.tools);
+					nextClosers.push(loaded.close);
+				} else if (server.kind === "http" && server.url) {
+					const tools = await buildRemoteMcpTools({
+						sources: [
+							{
+								connectorId: userMcpToolPrefix(server.id),
+								label: server.label,
+								mcpUrl: server.url,
+								accessToken: server.token ?? "",
+							},
+						],
+					});
+					nextTools.push(...tools);
+				}
+			} catch {
+				// fail-soft: a bad user MCP must not block the REPL
+			}
+		}
+		for (const close of extraMcpClosers) close();
+		extraMcpClosers = nextClosers;
+		extraMcpTools = nextTools;
+	};
+	await reloadIntegrations();
+	await reloadExtraMcp();
 
 	const or = resolveOpenRouter(config);
 	let apiKey = or.apiKey;
@@ -228,6 +268,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			...createGitTools(cwd),
 			createTodoTool(todos),
 			...extra,
+			...extraMcpTools,
 			...integrationTools,
 			createReadSkillTool(skills),
 		]);
@@ -315,6 +356,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		},
 		async reloadIntegrations() {
 			await reloadIntegrations();
+		},
+		async reloadExtraMcp() {
+			await reloadExtraMcp();
 		},
 		integrationIds() {
 			return linkedMcpSources().map((source) => source.connectorId);
@@ -488,7 +532,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			return session;
 		},
 		close() {
-			for (const close of closers) close();
+			for (const close of extraMcpClosers) close();
 			void observability.flush();
 		},
 	};
