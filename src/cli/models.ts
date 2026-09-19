@@ -1,3 +1,5 @@
+import { prettyLiveModelName } from "./openrouter-live.ts";
+
 export interface ModelOption {
 	id: string;
 	label: string;
@@ -31,7 +33,7 @@ export function modelPickerItems(
 	live?: ReadonlyMap<string, string>,
 ): Array<{ id: string; label: string; hint?: string }> {
 	const items = HARNESS_MODELS.map((model) => {
-		const target = live?.get(model.id)?.trim();
+		const target = prettyLiveModelName(live?.get(model.id)?.trim() ?? "").trim();
 		const hint = target && target.toLowerCase() !== model.label.toLowerCase() ? target : undefined;
 		return { id: model.id, label: model.label, ...(hint ? { hint } : {}) };
 	});

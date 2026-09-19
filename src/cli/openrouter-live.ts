@@ -9,7 +9,15 @@ function displayName(id: string, rawName: string): string {
 	const trimmed = rawName.trim();
 	if (!trimmed) return id;
 	const colon = trimmed.indexOf(": ");
-	return colon >= 0 ? trimmed.slice(colon + 2) : trimmed;
+	const name = colon >= 0 ? trimmed.slice(colon + 2) : trimmed;
+	return prettyLiveModelName(name);
+}
+
+/** OpenRouter calls Auto "Auto Router". Product copy is Auto / Auto beta. */
+export function prettyLiveModelName(name: string): string {
+	const lower = name.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+	if (!/\bauto\b/.test(lower) || !/\brouter\b/.test(lower)) return name;
+	return /\bbeta\b/.test(lower) ? "Auto beta" : "Auto";
 }
 
 /** Human name of the concrete model a `~latest` alias currently resolves to. */

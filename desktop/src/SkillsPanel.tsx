@@ -343,10 +343,6 @@ export function SkillsPanel(
 
 	return (
 		<div className="desk-integrations">
-			<p className="desk-integrations-lead">
-				Instruction files the agent reads when a task matches. Bundled skills stay off until you add
-				them. Disable a project skill to keep it out of the prompt without deleting the file.
-			</p>
 			<label className="desk-field">
 				<span className="visually-hidden">Search skills</span>
 				<input
@@ -379,9 +375,6 @@ export function SkillsPanel(
 							{searching ? null : (
 								<div className="desk-integration-split">
 									<p>Bundled</p>
-									<em>
-										Shipped with Caelence. Off until you add them; they do not start in the prompt.
-									</em>
 								</div>
 							)}
 							<SkillList

@@ -67,6 +67,7 @@ import {
 	startTurn,
 	transcribe,
 } from "./api";
+import { BubbleClip } from "./BubbleClip";
 import { AttachmentThumbs } from "./ComposerAttach";
 import {
 	type ComposerAttachment,
@@ -91,7 +92,9 @@ import { FloatNotice } from "./FloatNotice";
 import { integrationMatches } from "./integration-search";
 import { LogoMark } from "./LogoMark";
 import { McpPanel } from "./McpPanel";
+import { PlatformPane } from "./PlatformPane";
 import { pickerKeyAction, pickerStartIndex, stepIndex } from "./picker-nav";
+import { formatPlatformOutput, isPlatformTool } from "./platform";
 import {
 	enqueueMessage,
 	type QueuedMessage,
@@ -460,6 +463,7 @@ export function App(): React.ReactElement {
 		suffix?: string;
 	} | null>(null);
 	const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
+	const [integrations, setIntegrations] = useState<PublicIntegration[]>([]);
 	const [notice, setNotice] = useState<{ text: string; id: number } | null>(null);
 	const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
 	const [fileDrag, setFileDrag] = useState(false);
@@ -542,6 +546,13 @@ export function App(): React.ReactElement {
 			window.clearTimeout(timer);
 		};
 	}, []);
+
+	useEffect(() => {
+		if (!bridge) return;
+		void getIntegrations(bridge)
+			.then((result) => setIntegrations(result.items))
+			.catch(() => undefined);
+	}, [bridge]);
 
 	useEffect(() => {
 		const node = transcriptRef.current;
@@ -1539,6 +1550,7 @@ export function App(): React.ReactElement {
 												key={line.key}
 												line={line}
 												bridge={bridge}
+												integrations={integrations}
 												editing={
 													line.type === "user" && editingUser?.index === line.userTurnIndex
 														? editingUser.text
@@ -2498,7 +2510,11 @@ function UserTranscriptLine(
 				) : (
 					<>
 						<AttachmentThumbs items={shown.attachments} variant="chat" />
-						{shown.text ? <p>{shown.text}</p> : null}
+						{shown.text ? (
+							<BubbleClip text={shown.text}>
+								<p>{shown.text}</p>
+							</BubbleClip>
+						) : null}
 					</>
 				)}
 			</div>
@@ -2517,6 +2533,7 @@ function TranscriptLine(
 		onEditCancel?: () => void;
 		onOpenUrl?: (url: string) => void;
 		onOpenFile?: (path: string, reveal: boolean) => void;
+		integrations?: PublicIntegration[];
 	}>,
 ): React.ReactElement {
 	const { line, bridge, onOpenUrl, onOpenFile } = props;
@@ -2548,6 +2565,16 @@ function TranscriptLine(
 		);
 	}
 	if (line.type === "tool") {
+		if (isPlatformTool(line.name)) {
+			const body = formatPlatformOutput(line.output ?? "");
+			return (
+				<PlatformPane line={line} integrations={props.integrations ?? []}>
+					{body ? (
+						<RichBody text={body} bridge={bridge} onOpenUrl={onOpenUrl} onOpenFile={onOpenFile} />
+					) : null}
+				</PlatformPane>
+			);
+		}
 		const count = eventCountSuffix(line.count);
 		return (
 			<article className={`desk-line desk-line--event is-${line.status}`}>
