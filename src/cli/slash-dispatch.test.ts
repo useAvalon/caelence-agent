@@ -250,6 +250,31 @@ describe("dispatchSlash", () => {
 		expect(await runSlashLine(fakeHarness(), "/asdf")).toEqual({ kind: "hold" });
 	});
 
+	test("memory lists facts and can turn on", async () => {
+		const home = await mkdtemp(join(tmpdir(), "harness-mem-slash-"));
+		const cwd = await mkdtemp(join(tmpdir(), "harness-mem-slash-cwd-"));
+		const prevHome = process.env.HARNESS_HOME;
+		process.env.HARNESS_HOME = home;
+		try {
+			const { addFacts } = await import("../memory/store.ts");
+			addFacts(cwd, [{ text: "Prefer bun over npm for installs", scope: "user" }]);
+			const off = await dispatchSlash(fakeHarness({ cwd }), "/memory");
+			expect(off.kind).toBe("text");
+			if (off.kind === "text") {
+				expect(off.text).toContain("off");
+				expect(off.text).toContain("Prefer bun");
+			}
+			const on = await dispatchSlash(fakeHarness({ cwd }), "/memory on");
+			expect(on.kind).toBe("text");
+			if (on.kind === "text") expect(on.text).toContain("Memory on");
+		} finally {
+			if (prevHome === undefined) delete process.env.HARNESS_HOME;
+			else process.env.HARNESS_HOME = prevHome;
+			await rm(home, { recursive: true, force: true });
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	test("settings reports a missing key without opening a picker", async () => {
 		const result = await dispatchSlash(fakeHarness({ hasApiKey: false }), "/settings");
 		expect(result.kind).toBe("text");

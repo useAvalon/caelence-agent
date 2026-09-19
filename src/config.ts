@@ -24,6 +24,8 @@ export interface HarnessConfig {
 	openrouterBaseUrl?: string;
 	subagents?: { enabled?: boolean };
 	observability?: { enabled?: boolean };
+	/** Cross-session memory. Off unless this is true or ~/.harness/memory.json enables it. */
+	memory?: { enabled?: boolean };
 	/** Default agent. ask = read only. plan = read + todos. */
 	mode?: AgentMode;
 	hooks?: HookConfig[];
@@ -66,6 +68,7 @@ export async function loadConfig(cwd: string): Promise<HarnessConfig> {
 		},
 		mcp: partial.mcp ?? [],
 		observability: partial.observability,
+		memory: partial.memory,
 		mode: partial.mode,
 		hooks: partial.hooks,
 	};

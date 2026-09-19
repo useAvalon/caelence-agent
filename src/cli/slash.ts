@@ -20,6 +20,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 	{ name: "model", hint: "pick a model" },
 	{ name: "mode", hint: "ask, plan, or agent" },
 	{ name: "compact", hint: "summarize earlier turns" },
+	{ name: "memory", hint: "remember across chats", arg: true },
 	{ name: "image", hint: "generate an image", arg: true, slot: "[prompt]" },
 	{ name: "video", hint: "generate a clip", arg: true, slot: "[prompt]" },
 	{ name: "transcribe", hint: "speech to text model" },

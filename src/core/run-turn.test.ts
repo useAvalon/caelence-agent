@@ -202,12 +202,15 @@ describe("runTurn", () => {
 			cwd: "/tmp/proj",
 			userInstructions: "prefer bun",
 			projectInstructions: "no secrets",
+			memory: "Use these only when they are relevant.\n- Prefer bun",
 			mode: "ask",
 		});
 		expect(prompt).toContain("## User instructions");
 		expect(prompt).toContain("prefer bun");
 		expect(prompt).toContain("## Project instructions");
 		expect(prompt).toContain("no secrets");
+		expect(prompt).toContain("## Memory");
+		expect(prompt).toContain("Prefer bun");
 		expect(prompt).toContain("## Mode: ask");
 		expect(prompt).toContain("You are a coding agent in this project.");
 		expect(prompt).not.toContain("You are harness, a coding agent working in /tmp/proj");

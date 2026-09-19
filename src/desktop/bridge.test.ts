@@ -167,6 +167,36 @@ describe("desktop bridge", () => {
 		}
 	});
 
+	test("memory is off until enabled and can store a fact", async () => {
+		const ctx = await withBridge();
+		try {
+			const before = await fetch(`${ctx.ready.url}/memory`, { headers: ctx.headers });
+			const empty = (await before.json()) as { enabled: boolean; facts: unknown[] };
+			expect(empty.enabled).toBe(false);
+			expect(empty.facts).toEqual([]);
+
+			const { addFacts } = await import("../memory/store.ts");
+			addFacts(ctx.cwd, [{ text: "Prefer bun over npm for installs", scope: "user" }]);
+			const on = await fetch(`${ctx.ready.url}/memory`, {
+				method: "POST",
+				headers: ctx.headers,
+				body: JSON.stringify({ enabled: true }),
+			});
+			const body = (await on.json()) as {
+				enabled: boolean;
+				facts: Array<{ text: string }>;
+			};
+			expect(body.enabled).toBe(true);
+			expect(body.facts.some((fact) => fact.text.includes("Prefer bun"))).toBe(true);
+
+			const settings = await fetch(`${ctx.ready.url}/settings`, { headers: ctx.headers });
+			const saved = (await settings.json()) as { memoryEnabled: boolean };
+			expect(saved.memoryEnabled).toBe(true);
+		} finally {
+			await ctx.close();
+		}
+	});
+
 	test("slash help stays off the model", async () => {
 		const ctx = await withBridge();
 		try {

@@ -35,6 +35,8 @@ import {
 } from "../mcp/user-servers.ts";
 import { transcribeAudio } from "../media/openrouter-generate.ts";
 import { readMediaPrefs } from "../media/prefs.ts";
+import { isMemoryEnabled, writeMemoryPrefs } from "../memory/prefs.ts";
+import { deleteFact, isFactPinned, listFacts, pinFact, unpinFact } from "../memory/store.ts";
 import { PRODUCT_NAME } from "../product.ts";
 import { createHarness, type HarnessRuntime } from "../runtime.ts";
 import {
@@ -136,6 +138,20 @@ function settingsPayload(harness: HarnessRuntime) {
 		googleOAuthHint: google?.clientId ? maskSecret(google.clientId) : "",
 		hasMicrosoftOAuth: Boolean(microsoft?.clientId),
 		microsoftOAuthHint: microsoft?.clientId ? maskSecret(microsoft.clientId) : "",
+		memoryEnabled: isMemoryEnabled({ configEnabled: harness.config.memory?.enabled }),
+	};
+}
+
+function memoryPayload(harness: HarnessRuntime) {
+	return {
+		enabled: isMemoryEnabled({ configEnabled: harness.config.memory?.enabled }),
+		facts: listFacts(harness.cwd).map((fact) => ({
+			id: fact.id,
+			text: fact.text,
+			scope: fact.scope,
+			createdAt: fact.createdAt,
+			pinned: isFactPinned(harness.cwd, fact, harness.config.instructionsFile),
+		})),
 	};
 }
 
@@ -650,11 +666,39 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		}
 		saveProviderOAuth(body, "google");
 		saveProviderOAuth(body, "microsoft");
+		if (typeof body.memoryEnabled === "boolean") {
+			writeMemoryPrefs({ enabled: body.memoryEnabled });
+		}
 		return json({
 			ok: true,
 			...settingsPayload(harness),
 			state: snapshot(harness, busy, title),
 		});
+	};
+
+	const route_get_memory = async (_req: Request, _url: URL): Promise<Response> => {
+		return json(memoryPayload(harness));
+	};
+
+	const route_post_memory = async (req: Request, _url: URL): Promise<Response> => {
+		const body = await readJson(req);
+		if (typeof body.enabled === "boolean") {
+			writeMemoryPrefs({ enabled: body.enabled });
+		}
+		if (typeof body.delete === "string") {
+			const removed = deleteFact(harness.cwd, body.delete);
+			if (!removed) return json({ error: "No memory matches." }, 404);
+			const unpinned = unpinFact(harness.cwd, removed, harness.config.instructionsFile);
+			if ("error" in unpinned) return json({ error: unpinned.error }, 500);
+		}
+		if (typeof body.pin === "string") {
+			const fact = listFacts(harness.cwd).find((item) => item.id === body.pin);
+			if (!fact) return json({ error: "No memory matches." }, 404);
+			const pinned = pinFact(harness.cwd, fact, harness.config.instructionsFile);
+			if ("error" in pinned) return json({ error: pinned.error }, 500);
+			return json({ ok: true, path: pinned.path, ...memoryPayload(harness) });
+		}
+		return json({ ok: true, ...memoryPayload(harness) });
 	};
 
 	const route_get_slash = async (_req: Request, url: URL): Promise<Response> => {
@@ -922,6 +966,8 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		"POST /embed": route_post_embed,
 		"GET /embed": route_get_embed,
 		"POST /transcribe": route_post_transcribe,
+		"GET /memory": route_get_memory,
+		"POST /memory": route_post_memory,
 		"POST /settings": route_post_settings,
 		"GET /slash": route_get_slash,
 		"POST /session": route_post_session,

@@ -79,6 +79,19 @@ export {
 	runNamedEval,
 } from "./evals/runner.ts";
 export { initHost } from "./init.ts";
+export { extractMemories, parseExtractedFacts } from "./memory/extract.ts";
+export { isMemoryEnabled, readMemoryPrefs, writeMemoryPrefs } from "./memory/prefs.ts";
+export { formatMemoryList, formatRetrievedMemory } from "./memory/prompt.ts";
+export {
+	addFacts,
+	deleteFact,
+	listFacts,
+	type MemoryFact,
+	type MemoryScope,
+	pinFact,
+	searchFacts,
+	unpinFact,
+} from "./memory/store.ts";
 export {
 	createObservability,
 	createRecordingObservability,
