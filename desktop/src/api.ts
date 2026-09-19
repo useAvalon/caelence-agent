@@ -166,6 +166,7 @@ export interface DesktopSettings {
 	googleOAuthHint: string;
 	hasMicrosoftOAuth: boolean;
 	microsoftOAuthHint: string;
+	memoryEnabled: boolean;
 }
 
 export interface PublicIntegration {
@@ -182,6 +183,30 @@ export interface PublicIntegration {
 
 export function getSettings(bridge: BridgeClient): Promise<DesktopSettings> {
 	return request(bridge, "/settings");
+}
+
+export interface PublicMemoryFact {
+	id: string;
+	text: string;
+	scope: "user" | "project";
+	createdAt: string;
+	pinned?: boolean;
+}
+
+export interface MemoryState {
+	enabled: boolean;
+	facts: PublicMemoryFact[];
+}
+
+export function getMemory(bridge: BridgeClient): Promise<MemoryState> {
+	return request(bridge, "/memory");
+}
+
+export function saveMemory(
+	bridge: BridgeClient,
+	body: { enabled?: boolean; delete?: string; pin?: string },
+): Promise<{ ok: boolean; path?: string } & MemoryState> {
+	return request(bridge, "/memory", { method: "POST", body: JSON.stringify(body) });
 }
 
 export function getIntegrations(bridge: BridgeClient): Promise<{ items: PublicIntegration[] }> {
@@ -336,6 +361,16 @@ export function openPath(
 	});
 }
 
+export function deleteUploads(
+	bridge: BridgeClient,
+	rels: readonly string[],
+): Promise<{ ok: boolean; state: DesktopState }> {
+	return request(bridge, "/uploads/delete", {
+		method: "POST",
+		body: JSON.stringify({ rels }),
+	});
+}
+
 export function readFilePreview(
 	bridge: BridgeClient,
 	path: string,
@@ -383,6 +418,7 @@ export function saveSettings(
 		googleClientSecret?: string;
 		microsoftClientId?: string;
 		microsoftClientSecret?: string;
+		memoryEnabled?: boolean;
 	},
 ): Promise<
 	{

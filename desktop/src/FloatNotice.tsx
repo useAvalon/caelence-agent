@@ -8,16 +8,19 @@ import { useEffect } from "react";
 
 export const NOTICE_MS = 4000;
 
+export type NoticeKind = "ok" | "error";
+
 export function FloatNotice(
-	props: Readonly<{ text: string; onDismiss: () => void }>,
+	props: Readonly<{ text: string; kind?: NoticeKind; onDismiss: () => void }>,
 ): React.ReactElement {
 	const { text, onDismiss } = props;
+	const kind = props.kind ?? "ok";
 	useEffect(() => {
 		const id = window.setTimeout(onDismiss, NOTICE_MS);
 		return () => window.clearTimeout(id);
 	}, [onDismiss]);
 	return (
-		<output className="desk-notice cel-float">
+		<output className={`desk-notice cel-float${kind === "error" ? " desk-notice--error" : ""}`}>
 			<span className="desk-notice__label">{text}</span>
 			<button type="button" className="desk-notice__close" aria-label="Dismiss" onClick={onDismiss}>
 				<XIcon size={16} weight="regular" />

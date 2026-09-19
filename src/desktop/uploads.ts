@@ -1,7 +1,15 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
-import { toProjectRel } from "../tools/paths.ts";
+import { basename, isAbsolute, resolve } from "node:path";
+import { resolveUnderCwd, toProjectRel } from "../tools/paths.ts";
 import { composeUploadMessage as buildUploadMessage } from "./upload-message.ts";
 
 export const MAX_UPLOADS = 8;
@@ -10,10 +18,51 @@ const TEXT_EXCERPT_BYTES = 100_000;
 const INDEX_NAME = "index.json";
 const MAX_LISTED = 40;
 
-const TEXT_MIME =
-	/^(text\/|application\/(json|xml|javascript|sql|yaml|x-yaml|toml|x-sh|x-httpd-php))/i;
-const TEXT_EXT =
-	/\.(txt|md|markdown|json|csv|tsv|ts|tsx|js|jsx|mjs|cjs|css|scss|html|htm|xml|yml|yaml|toml|py|rs|go|sh|bash|zsh|env|svg|log|ini|cfg)$/i;
+const TEXT_MIME_PREFIXES = [
+	"text/",
+	"application/json",
+	"application/xml",
+	"application/javascript",
+	"application/sql",
+	"application/yaml",
+	"application/x-yaml",
+	"application/toml",
+	"application/x-sh",
+	"application/x-httpd-php",
+];
+const TEXT_EXTS = new Set([
+	"txt",
+	"md",
+	"markdown",
+	"json",
+	"csv",
+	"tsv",
+	"ts",
+	"tsx",
+	"js",
+	"jsx",
+	"mjs",
+	"cjs",
+	"css",
+	"scss",
+	"html",
+	"htm",
+	"xml",
+	"yml",
+	"yaml",
+	"toml",
+	"py",
+	"rs",
+	"go",
+	"sh",
+	"bash",
+	"zsh",
+	"env",
+	"svg",
+	"log",
+	"ini",
+	"cfg",
+]);
 
 export interface IncomingUpload {
 	name: string;
@@ -38,21 +87,25 @@ export interface UploadRecord {
 	addedAt: string;
 }
 
+function incomingFromUnknown(item: unknown): IncomingUpload | undefined {
+	if (!item || typeof item !== "object") return undefined;
+	const rec = item as Record<string, unknown>;
+	const name = typeof rec.name === "string" ? rec.name.trim() : "";
+	const data = typeof rec.data === "string" ? rec.data.trim() : "";
+	if (!name || !data) return undefined;
+	const mime =
+		typeof rec.mime === "string" && rec.mime.trim() ? rec.mime.trim() : "application/octet-stream";
+	const sourcePath = parseSourcePath(rec.sourcePath);
+	return { name, mime, data, ...(sourcePath ? { sourcePath } : {}) };
+}
+
 export function parseIncomingUploads(raw: unknown): IncomingUpload[] {
 	if (!Array.isArray(raw)) return [];
 	const out: IncomingUpload[] = [];
 	for (const item of raw) {
-		if (!item || typeof item !== "object") continue;
-		const rec = item as Record<string, unknown>;
-		const name = typeof rec.name === "string" ? rec.name.trim() : "";
-		const data = typeof rec.data === "string" ? rec.data.trim() : "";
-		const mime =
-			typeof rec.mime === "string" && rec.mime.trim()
-				? rec.mime.trim()
-				: "application/octet-stream";
-		if (!name || !data) continue;
-		const sourcePath = parseSourcePath(rec.sourcePath);
-		out.push({ name, mime, data, ...(sourcePath ? { sourcePath } : {}) });
+		const parsed = incomingFromUnknown(item);
+		if (!parsed) continue;
+		out.push(parsed);
 		if (out.length >= MAX_UPLOADS) break;
 	}
 	return out;
@@ -61,7 +114,13 @@ export function parseIncomingUploads(raw: unknown): IncomingUpload[] {
 export function parseSourcePath(raw: unknown): string | undefined {
 	if (typeof raw !== "string") return undefined;
 	const trimmed = raw.trim();
-	if (!trimmed || trimmed.includes("\0") || /\n|\r/.test(trimmed) || trimmed.length > 1024) {
+	if (
+		!trimmed ||
+		trimmed.includes("\0") ||
+		trimmed.includes("\n") ||
+		trimmed.includes("\r") ||
+		trimmed.length > 1024
+	) {
 		return undefined;
 	}
 	if (trimmed.startsWith("file://")) return undefined;
@@ -84,7 +143,11 @@ export function displaySourcePath(abs: string): string {
 }
 
 export function isTextUpload(name: string, mime: string): boolean {
-	return TEXT_MIME.test(mime) || TEXT_EXT.test(name);
+	const lowerMime = mime.toLowerCase();
+	if (TEXT_MIME_PREFIXES.some((prefix) => lowerMime.startsWith(prefix))) return true;
+	const dot = name.lastIndexOf(".");
+	if (dot < 0) return false;
+	return TEXT_EXTS.has(name.slice(dot + 1).toLowerCase());
 }
 
 export function safeUploadName(name: string): string {
@@ -101,31 +164,28 @@ function storedDisplayName(filename: string): string {
 	return filename.replace(/^\d+-\d+-/, "") || filename;
 }
 
+function recordFromUnknown(item: unknown): UploadRecord | undefined {
+	if (!item || typeof item !== "object") return undefined;
+	const rec = item as Record<string, unknown>;
+	const name = typeof rec.name === "string" ? rec.name : "";
+	const rel = typeof rec.rel === "string" ? rec.rel : "";
+	if (!name || !rel) return undefined;
+	const mime = typeof rec.mime === "string" ? rec.mime : "application/octet-stream";
+	const addedAt = typeof rec.addedAt === "string" ? rec.addedAt : "";
+	const sourcePath = parseSourcePath(rec.sourcePath);
+	return { name, rel, mime, addedAt, ...(sourcePath ? { sourcePath } : {}) };
+}
+
 function readIndex(dir: string): UploadRecord[] {
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(resolve(dir, INDEX_NAME), "utf8"));
 		if (!parsed || typeof parsed !== "object") return [];
 		const files = (parsed as { files?: unknown }).files;
 		if (!Array.isArray(files)) return [];
-		const out: UploadRecord[] = [];
-		for (const item of files) {
-			if (!item || typeof item !== "object") continue;
-			const rec = item as Record<string, unknown>;
-			const name = typeof rec.name === "string" ? rec.name : "";
-			const rel = typeof rec.rel === "string" ? rec.rel : "";
-			if (!name || !rel) continue;
-			const mime = typeof rec.mime === "string" ? rec.mime : "application/octet-stream";
-			const addedAt = typeof rec.addedAt === "string" ? rec.addedAt : "";
-			const sourcePath = parseSourcePath(rec.sourcePath);
-			out.push({
-				name,
-				rel,
-				mime,
-				addedAt,
-				...(sourcePath ? { sourcePath } : {}),
-			});
-		}
-		return out;
+		return files.flatMap((item) => {
+			const rec = recordFromUnknown(item);
+			return rec ? [rec] : [];
+		});
 	} catch {
 		return [];
 	}
@@ -157,7 +217,7 @@ export function listUploads(cwd: string): UploadRecord[] {
 		// no uploads folder yet
 	}
 	return [...byRel.values()]
-		.sort((a, b) => (a.addedAt < b.addedAt ? 1 : a.addedAt > b.addedAt ? -1 : 0))
+		.sort((left, right) => right.addedAt.localeCompare(left.addedAt))
 		.slice(0, MAX_LISTED);
 }
 
@@ -202,6 +262,41 @@ export function matchUploadEdit(
 	return undefined;
 }
 
+function existingSourcePath(raw: string | undefined): string | undefined {
+	if (!raw) return undefined;
+	const abs = expandSourcePath(raw);
+	return existsSync(abs) ? abs : undefined;
+}
+
+function excerptForUpload(item: IncomingUpload, bytes: Buffer): string | undefined {
+	if (!isTextUpload(item.name, item.mime) || bytes.byteLength > TEXT_EXCERPT_BYTES) {
+		return undefined;
+	}
+	return bytes.toString("utf8");
+}
+
+function writeOneUpload(
+	cwd: string,
+	dir: string,
+	item: IncomingUpload,
+	index: number,
+): SavedUpload | undefined {
+	const bytes = Buffer.from(item.data, "base64");
+	if (bytes.byteLength === 0 || bytes.byteLength > MAX_UPLOAD_BYTES) return undefined;
+	const unique = `${Date.now()}-${index}-${safeUploadName(item.name)}`;
+	const abs = resolve(dir, unique);
+	writeFileSync(abs, bytes);
+	const excerpt = excerptForUpload(item, bytes);
+	const sourcePath = existingSourcePath(item.sourcePath);
+	return {
+		name: item.name,
+		rel: toProjectRel(cwd, abs),
+		mime: item.mime,
+		...(excerpt !== undefined ? { excerpt } : {}),
+		...(sourcePath ? { sourcePath } : {}),
+	};
+}
+
 export function saveUploads(cwd: string, items: IncomingUpload[]): SavedUpload[] {
 	if (items.length === 0) return [];
 	const dir = uploadsDir(cwd);
@@ -209,38 +304,55 @@ export function saveUploads(cwd: string, items: IncomingUpload[]): SavedUpload[]
 	const saved: SavedUpload[] = [];
 	const records = listUploads(cwd);
 	for (const item of items) {
-		const bytes = Buffer.from(item.data, "base64");
-		if (bytes.byteLength === 0 || bytes.byteLength > MAX_UPLOAD_BYTES) continue;
-		const unique = `${Date.now()}-${saved.length}-${safeUploadName(item.name)}`;
-		const abs = resolve(dir, unique);
-		writeFileSync(abs, bytes);
-		const rel = toProjectRel(cwd, abs);
-		const excerpt =
-			isTextUpload(item.name, item.mime) && bytes.byteLength <= TEXT_EXCERPT_BYTES
-				? bytes.toString("utf8")
-				: undefined;
-		const sourcePath = item.sourcePath
-			? existsSync(expandSourcePath(item.sourcePath))
-				? expandSourcePath(item.sourcePath)
-				: undefined
-			: undefined;
-		saved.push({
-			name: item.name,
-			rel,
-			mime: item.mime,
-			...(excerpt !== undefined ? { excerpt } : {}),
-			...(sourcePath ? { sourcePath } : {}),
-		});
+		const next = writeOneUpload(cwd, dir, item, saved.length);
+		if (!next) continue;
+		saved.push(next);
 		records.unshift({
-			name: item.name,
-			rel,
-			mime: item.mime,
+			name: next.name,
+			rel: next.rel,
+			mime: next.mime,
 			addedAt: new Date().toISOString(),
-			...(sourcePath ? { sourcePath } : {}),
+			...(next.sourcePath ? { sourcePath: next.sourcePath } : {}),
 		});
 	}
 	writeIndex(dir, records.slice(0, MAX_LISTED));
 	return saved;
+}
+
+export function deleteUploads(cwd: string, rels: readonly string[]): UploadRecord[] {
+	const wanted = new Set(rels.filter((rel) => rel.trim().length > 0));
+	if (wanted.size === 0) return listUploads(cwd);
+	const dir = uploadsDir(cwd);
+	const keep: UploadRecord[] = [];
+	for (const item of listUploads(cwd)) {
+		if (!wanted.has(item.rel) || !isListedUploadRel(cwd, dir, item.rel)) {
+			keep.push(item);
+			continue;
+		}
+		try {
+			const abs = resolveUnderCwd(cwd, item.rel);
+			if (existsSync(abs) && statSync(abs).isFile()) unlinkSync(abs);
+		} catch {
+			keep.push(item);
+		}
+	}
+	try {
+		writeIndex(dir, keep);
+	} catch {
+		// no uploads folder
+	}
+	return keep;
+}
+
+function isListedUploadRel(cwd: string, dir: string, rel: string): boolean {
+	if (basename(rel) === INDEX_NAME) return false;
+	if (!rel.startsWith(".harness/uploads/") || rel.includes("\0")) return false;
+	try {
+		const abs = resolveUnderCwd(cwd, rel);
+		return abs.startsWith(`${dir}/`) && abs !== dir;
+	} catch {
+		return false;
+	}
 }
 
 export function composeUploadMessage(text: string, files: SavedUpload[]): string {

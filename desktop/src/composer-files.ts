@@ -1,4 +1,4 @@
-import { blobToBase64 } from "./dictation.ts";
+import { blobToBase64 } from "./dictation";
 
 export const MAX_COMPOSER_FILES = 8;
 export const MAX_COMPOSER_FILE_BYTES = 10 * 1024 * 1024;
@@ -81,7 +81,7 @@ export function createAttachment(file: File): ComposerAttachment {
 			: undefined;
 	const sourcePath = nativeFilePath(file);
 	return {
-		id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
+		id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
 		name: file.name || "file",
 		mime,
 		size: file.size,

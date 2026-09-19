@@ -1,7 +1,7 @@
 import { FileIcon as FileGlyph } from "@phosphor-icons/react/dist/csr/File";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import type { AttachmentPreview, ComposerFileKind } from "./composer-files.ts";
-import { fileExtension } from "./composer-files.ts";
+import type { AttachmentPreview, ComposerFileKind } from "./composer-files";
+import { fileExtension } from "./composer-files";
 
 export function AttachmentThumbs(
 	props: Readonly<{
