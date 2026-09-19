@@ -3,6 +3,7 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveOpenRouter } from "../config.ts";
 import type { ApprovalRequest } from "../core/approval.ts";
+import { isUploadEditRequest } from "../core/approval.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { AgentEvent } from "../core/events.ts";
 import type { Session } from "../core/session.ts";
@@ -389,10 +390,15 @@ function SlashMenu(
 }
 
 function ApprovalCard(props: Readonly<{ theme: Theme; req: ApprovalRequest }>): React.ReactElement {
+	const upload = isUploadEditRequest(props.req);
 	const command =
 		typeof props.req.input.command === "string"
 			? props.req.input.command
 			: JSON.stringify(props.req.input);
+	const copyPath =
+		typeof props.req.input.copyPath === "string" ? props.req.input.copyPath : undefined;
+	const originalPath =
+		typeof props.req.input.originalPath === "string" ? props.req.input.originalPath : undefined;
 	return (
 		<Box
 			flexDirection="column"
@@ -401,9 +407,21 @@ function ApprovalCard(props: Readonly<{ theme: Theme; req: ApprovalRequest }>): 
 			borderColor={props.theme.warning}
 			paddingX={1}
 		>
-			<Text color={props.theme.warning}>Approval needed · {props.req.toolName}</Text>
-			<Text color={props.theme.ink}>{command}</Text>
-			<Text color={props.theme.muted}>y approve · n deny · a always this session</Text>
+			<Text color={props.theme.warning}>
+				{upload ? "Edit this file where?" : `Approval needed · ${props.req.toolName}`}
+			</Text>
+			{upload ? (
+				<>
+					<Text color={props.theme.ink}>Copy: {copyPath}</Text>
+					<Text color={props.theme.ink}>Original: {originalPath}</Text>
+					<Text color={props.theme.muted}>c copy · o original · n cancel</Text>
+				</>
+			) : (
+				<>
+					<Text color={props.theme.ink}>{command}</Text>
+					<Text color={props.theme.muted}>y approve · n deny · a always this session</Text>
+				</>
+			)}
 		</Box>
 	);
 }
@@ -418,7 +436,17 @@ function pickerSelectedValue(picker: SlashPickerKind, harness: HarnessRuntime): 
 	return undefined;
 }
 
-function approvalDecision(input: string, escaped: boolean): "yes" | "no" | "always" | undefined {
+function approvalDecision(
+	input: string,
+	escaped: boolean,
+	upload: boolean,
+): "yes" | "no" | "always" | "copy" | "original" | undefined {
+	if (upload) {
+		if (input === "c" || input === "C") return "copy";
+		if (input === "o" || input === "O") return "original";
+		if (input === "n" || input === "N" || escaped) return "no";
+		return undefined;
+	}
 	if (input === "y" || input === "Y") return "yes";
 	if (input === "a" || input === "A") return "always";
 	if (input === "n" || input === "N" || escaped) return "no";
@@ -664,9 +692,16 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 	useInput(
 		(input, key) => {
 			if (status === "approval" && pending) {
-				const decision = approvalDecision(input, key.escape);
+				const decision = approvalDecision(input, key.escape, isUploadEditRequest(pending.req));
 				if (!decision) return;
 				if (decision === "always") harness.allowRiskyAlways(pending.req.toolName);
+				if (
+					decision === "original" &&
+					typeof pending.req.input.originalPath === "string" &&
+					pending.req.input.originalPath.trim()
+				) {
+					pending.req.input.path = pending.req.input.originalPath;
+				}
 				pending.resolve(decision !== "no");
 				setPending(null);
 				setStatus("running");

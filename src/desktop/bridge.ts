@@ -48,7 +48,7 @@ import {
 import { openResolvedPath, resolveLocalPath } from "./open-local.ts";
 import { readPreviewCache, writePreviewCache } from "./preview-cache.ts";
 import { applyStoredOpenRouterKey, maskSecret, writeOpenRouterKey } from "./secrets.ts";
-import { composeUploadMessage, parseIncomingUploads, saveUploads } from "./uploads.ts";
+import { composeUploadMessage, listUploads, parseIncomingUploads, saveUploads } from "./uploads.ts";
 
 export interface DesktopState {
 	name: string;
@@ -69,6 +69,7 @@ export interface DesktopState {
 	skills: Array<{ name: string; source: string }>;
 	busy: boolean;
 	hasApiKey: boolean;
+	uploads?: Array<{ name: string; rel: string; sourcePath?: string }>;
 }
 
 export interface BridgeReady {
@@ -255,6 +256,11 @@ function snapshot(harness: HarnessRuntime, busy: boolean, title: string): Deskto
 		skills: harness.skills.map((skill) => ({ name: skill.name, source: skill.source })),
 		busy,
 		hasApiKey: harness.hasApiKey,
+		uploads: listUploads(harness.cwd).map((item) => ({
+			name: item.name,
+			rel: item.rel,
+			...(item.sourcePath ? { sourcePath: item.sourcePath } : {}),
+		})),
 	};
 }
 
@@ -278,7 +284,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 	let title = "New chat";
 	let busy = false;
 	let abort: AbortController | undefined;
-	const pending = new Map<string, (ok: boolean) => void>();
+	const pending = new Map<string, (decision: string) => void>();
 	const oauthWaiters = new Map<string, (result: OAuthCallback) => void>();
 
 	const refreshLiveNames = (): void => {
@@ -692,13 +698,13 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		if (decision === "always")
 			harness.allowRiskyAlways(typeof body.toolName === "string" ? body.toolName : "exec");
 		pending.delete(callId);
-		resolve(decision === "yes" || decision === "always");
+		resolve(typeof decision === "string" ? decision : "no");
 		return json({ ok: true });
 	};
 
 	const route_post_abort = async (_req: Request, _url: URL): Promise<Response> => {
 		abort?.abort();
-		for (const resolve of pending.values()) resolve(false);
+		for (const resolve of pending.values()) resolve("no");
 		pending.clear();
 		return json({ ok: true });
 	};
@@ -767,7 +773,21 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 						signal: abort?.signal,
 						approvalAsk: (req: ApprovalRequest) =>
 							new Promise<boolean>((resolve) => {
-								pending.set(req.callId, resolve);
+								pending.set(req.callId, (decision) => {
+									if (
+										decision === "original" &&
+										typeof req.input.originalPath === "string" &&
+										req.input.originalPath.trim()
+									) {
+										req.input.path = req.input.originalPath;
+									}
+									resolve(
+										decision === "yes" ||
+											decision === "always" ||
+											decision === "copy" ||
+											decision === "original",
+									);
+								});
 							}),
 						...(editUserTurn !== undefined ? { editUserTurn } : {}),
 					})
@@ -872,7 +892,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		ready,
 		stop: async () => {
 			abort?.abort();
-			for (const resolve of pending.values()) resolve(false);
+			for (const resolve of pending.values()) resolve("no");
 			pending.clear();
 			for (const resolve of oauthWaiters.values()) resolve({ error: "cancelled" });
 			oauthWaiters.clear();

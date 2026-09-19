@@ -1,6 +1,7 @@
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUpRight";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/csr/FolderSimple";
 import { GearIcon } from "@phosphor-icons/react/dist/csr/Gear";
 import { MicrophoneIcon } from "@phosphor-icons/react/dist/csr/Microphone";
@@ -85,6 +86,7 @@ import {
 	isMicPermissionDenied,
 	pickRecorderMime,
 } from "./dictation";
+import { FilesPanel, homePath } from "./FilesPanel";
 import { FloatNotice } from "./FloatNotice";
 import { integrationMatches } from "./integration-search";
 import { LogoMark } from "./LogoMark";
@@ -116,10 +118,11 @@ import {
 	thoughtTools,
 } from "./thought";
 import { eventCountSuffix } from "./tool-label";
+import { joinUploadDisplay, userBubbleContent } from "./user-display";
 
 type ThemeChoice = "system" | "light" | "dark";
 type UiStatus = "boot" | "idle" | "running" | "approval" | "picker";
-type MainView = "chat" | "settings" | "integrations" | "skills";
+type MainView = "chat" | "settings" | "integrations" | "skills" | "files";
 
 interface PickerState {
 	title: string;
@@ -141,6 +144,14 @@ interface PendingApproval {
 	input: Record<string, unknown>;
 }
 
+function isUploadEditPending(pending: PendingApproval): boolean {
+	return (
+		(pending.toolName === "edit_file" || pending.toolName === "write_file") &&
+		typeof pending.input.originalPath === "string" &&
+		pending.input.originalPath.trim().length > 0
+	);
+}
+
 function pickerSelectedId(kind: SlashPickerKind, current: DesktopState): string | undefined {
 	if (kind === "model") return current.modelId;
 	if (kind === "mode") return current.mode;
@@ -154,6 +165,7 @@ function mainViewTitle(view: MainView): string {
 	if (view === "settings") return "Settings";
 	if (view === "integrations") return "Integrations";
 	if (view === "skills") return "Skills";
+	if (view === "files") return "Files";
 	return "Chat";
 }
 
@@ -277,10 +289,12 @@ function DeskSidePanel(
 		bridge: BridgeClient | null;
 		theme: ThemeChoice;
 		skillQuery: string;
+		uploads: Array<{ name: string; rel: string; sourcePath?: string }>;
 		onTheme: (theme: ThemeChoice) => void;
 		onSaved: (state: DesktopState) => void;
 		onNotice: (text: string) => void;
 		onSkillQuery: (value: string) => void;
+		onOpenFile: (path: string, reveal: boolean) => void;
 	}>,
 ): React.ReactElement | null {
 	if (!props.bridge) return null;
@@ -307,6 +321,9 @@ function DeskSidePanel(
 				onNotice={props.onNotice}
 			/>
 		);
+	}
+	if (props.view === "files") {
+		return <FilesPanel items={props.uploads} onOpen={props.onOpenFile} />;
 	}
 	return null;
 }
@@ -437,7 +454,11 @@ export function App(): React.ReactElement {
 	const [pending, setPending] = useState<PendingApproval | null>(null);
 	const [listening, setListening] = useState(false);
 	const [queue, setQueue] = useState<QueuedMessage[]>([]);
-	const [editingUser, setEditingUser] = useState<{ index: number; text: string } | null>(null);
+	const [editingUser, setEditingUser] = useState<{
+		index: number;
+		text: string;
+		suffix?: string;
+	} | null>(null);
 	const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
 	const [notice, setNotice] = useState<{ text: string; id: number } | null>(null);
 	const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -919,8 +940,8 @@ export function App(): React.ReactElement {
 
 	const commitEdit = useCallback(async () => {
 		if (!bridge || !editingUser) return;
-		const text = editingUser.text.trim();
-		if (!text) return;
+		const text = joinUploadDisplay(editingUser.text, editingUser.suffix);
+		if (!text.trim()) return;
 		const index = editingUser.index;
 		setEditingUser(null);
 		skipDrainRef.current = true;
@@ -1118,7 +1139,7 @@ export function App(): React.ReactElement {
 	}, [renamingId, sessionMenu]);
 
 	const decide = useCallback(
-		async (decision: "yes" | "no" | "always") => {
+		async (decision: "yes" | "no" | "always" | "copy" | "original") => {
 			if (!bridge || !pending) return;
 			await approve(bridge, {
 				callId: pending.callId,
@@ -1421,6 +1442,15 @@ export function App(): React.ReactElement {
 				</section>
 				<button
 					type="button"
+					className={`desk-settings-btn ${view === "files" ? "is-on" : ""}`}
+					aria-label="Files"
+					onClick={() => setView((current) => (current === "files" ? "chat" : "files"))}
+				>
+					<FileIcon size={16} weight="regular" />
+					<span>Files</span>
+				</button>
+				<button
+					type="button"
 					className={`desk-settings-btn ${view === "skills" ? "is-on" : ""}`}
 					aria-label="Skills"
 					onClick={() => {
@@ -1475,10 +1505,16 @@ export function App(): React.ReactElement {
 							bridge={bridge}
 							theme={theme}
 							skillQuery={skillQuery}
+							uploads={state.uploads ?? []}
 							onTheme={setTheme}
 							onSaved={(next) => setState(next)}
 							onNotice={showNotice}
 							onSkillQuery={setSkillQuery}
+							onOpenFile={(path, reveal) => {
+								void openLocalFile(path, reveal, bridge).catch((err: unknown) => {
+									noticeError(err);
+								});
+							}}
 						/>
 					) : (
 						<div className="desk-transcript" ref={transcriptRef}>
@@ -1510,7 +1546,14 @@ export function App(): React.ReactElement {
 												}
 												onStartEdit={
 													line.type === "user"
-														? () => setEditingUser({ index: line.userTurnIndex, text: line.text })
+														? () => {
+																const shown = userBubbleContent(line.text, line.attachments);
+																setEditingUser({
+																	index: line.userTurnIndex,
+																	text: shown.text,
+																	suffix: shown.suffix,
+																});
+															}
 														: undefined
 												}
 												onEditChange={(text) =>
@@ -1541,31 +1584,70 @@ export function App(): React.ReactElement {
 
 					{view === "chat" && pending ? (
 						<section className="desk-approve" aria-label="Approval needed">
-							<p>Approval needed · {pending.toolName}</p>
-							<pre className="cel-code">{approvalPreview}</pre>
-							<div className="desk-approve-actions">
-								<button
-									type="button"
-									className="cel-btn cel-btn--secondary cel-btn--compact"
-									onClick={() => void decide("yes")}
-								>
-									Approve
-								</button>
-								<button
-									type="button"
-									className="cel-btn cel-btn--secondary cel-btn--compact"
-									onClick={() => void decide("no")}
-								>
-									Deny
-								</button>
-								<button
-									type="button"
-									className="cel-btn cel-btn--tertiary cel-btn--compact"
-									onClick={() => void decide("always")}
-								>
-									Always this session
-								</button>
-							</div>
+							{isUploadEditPending(pending) ? (
+								<>
+									<p>Edit this file where?</p>
+									<pre className="cel-code">
+										{typeof pending.input.fileName === "string" ? pending.input.fileName : "File"}
+										{"\n"}Copy:{" "}
+										{typeof pending.input.copyPath === "string"
+											? pending.input.copyPath
+											: approvalPreview}
+										{"\n"}Original: {homePath(String(pending.input.originalPath))}
+									</pre>
+									<div className="desk-approve-actions">
+										<button
+											type="button"
+											className="cel-btn cel-btn--secondary cel-btn--compact"
+											onClick={() => void decide("copy")}
+										>
+											Copy
+										</button>
+										<button
+											type="button"
+											className="cel-btn cel-btn--secondary cel-btn--compact"
+											onClick={() => void decide("original")}
+										>
+											Original
+										</button>
+										<button
+											type="button"
+											className="cel-btn cel-btn--tertiary cel-btn--compact"
+											onClick={() => void decide("no")}
+										>
+											Cancel
+										</button>
+									</div>
+								</>
+							) : (
+								<>
+									<p>Approval needed · {pending.toolName}</p>
+									<pre className="cel-code">{approvalPreview}</pre>
+									<div className="desk-approve-actions">
+										<button
+											type="button"
+											className="cel-btn cel-btn--secondary cel-btn--compact"
+											onClick={() => void decide("yes")}
+										>
+											Approve
+										</button>
+										<button
+											type="button"
+											className="cel-btn cel-btn--secondary cel-btn--compact"
+											onClick={() => void decide("no")}
+										>
+											Deny
+										</button>
+										<button
+											type="button"
+											className="cel-btn cel-btn--tertiary cel-btn--compact"
+											onClick={() => void decide("always")}
+										>
+											Always this session
+										</button>
+									</div>
+								</>
+							)}
 						</section>
 					) : null}
 
@@ -2360,6 +2442,7 @@ function UserTranscriptLine(
 	}>,
 ): React.ReactElement {
 	const editing = props.editing != null;
+	const shown = userBubbleContent(props.line.text, props.line.attachments);
 	return (
 		<article className={`desk-line desk-line--user${editing ? " is-editing" : ""}`}>
 			<p className="desk-line__who">
@@ -2414,8 +2497,8 @@ function UserTranscriptLine(
 					</>
 				) : (
 					<>
-						<AttachmentThumbs items={props.line.attachments ?? []} variant="chat" />
-						{props.line.text ? <p>{props.line.text}</p> : null}
+						<AttachmentThumbs items={shown.attachments} variant="chat" />
+						{shown.text ? <p>{shown.text}</p> : null}
 					</>
 				)}
 			</div>

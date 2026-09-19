@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	createExecApprovalGate,
 	isLikelyDestructive,
+	isUploadEditRequest,
 	parseExecApprovalPolicy,
 } from "../core/approval.ts";
 
@@ -98,5 +99,26 @@ describe("exec approval", () => {
 		expect(
 			await auto.request({ callId: "2", toolName: "edit_file", input: { path: "a.ts" } }),
 		).toBe(true);
+	});
+
+	test("asks where to edit an uploaded file with an original path", async () => {
+		const input: Record<string, unknown> = { path: ".harness/uploads/1-note.txt" };
+		const asked: string[] = [];
+		const gate = createExecApprovalGate({
+			policy: "prompt",
+			resolveUploadEdit: (path) =>
+				path.includes("uploads")
+					? { rel: path, sourcePath: "/tmp/note.txt", name: "note.txt" }
+					: undefined,
+			ask: async (req) => {
+				asked.push(req.toolName);
+				expect(isUploadEditRequest(req)).toBe(true);
+				req.input.path = req.input.originalPath;
+				return true;
+			},
+		});
+		expect(await gate.request({ callId: "1", toolName: "edit_file", input })).toBe(true);
+		expect(asked).toEqual(["edit_file"]);
+		expect(input.path).toBe("/tmp/note.txt");
 	});
 });

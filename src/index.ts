@@ -20,6 +20,7 @@ export {
 	type ExecApprovalPolicy,
 	isLikelyDestructive,
 	isRiskyToolCall,
+	isUploadEditRequest,
 	parseExecApprovalPolicy,
 } from "./core/approval.ts";
 export type { AgentEvent, AgentEventEmitter, MainModelProvider } from "./core/events.ts";

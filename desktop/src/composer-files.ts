@@ -12,6 +12,7 @@ export interface ComposerAttachment {
 	size: number;
 	kind: ComposerFileKind;
 	previewUrl?: string;
+	sourcePath?: string;
 	file: File;
 }
 
@@ -19,6 +20,7 @@ export interface TurnAttachmentPayload {
 	name: string;
 	mime: string;
 	data: string;
+	sourcePath?: string;
 }
 
 export interface AttachmentPreview {
@@ -62,6 +64,11 @@ export function droppedPaths(transfer: DataTransfer | null): string[] {
 	return paths;
 }
 
+export function nativeFilePath(file: File): string | undefined {
+	const path = (file as File & { path?: string }).path?.trim();
+	return path || undefined;
+}
+
 export function createAttachment(file: File): ComposerAttachment {
 	const mime = file.type || "application/octet-stream";
 	const kind = attachmentKind(file.name, mime);
@@ -72,6 +79,7 @@ export function createAttachment(file: File): ComposerAttachment {
 		typeof URL.createObjectURL === "function"
 			? URL.createObjectURL(file)
 			: undefined;
+	const sourcePath = nativeFilePath(file);
 	return {
 		id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
 		name: file.name || "file",
@@ -79,6 +87,7 @@ export function createAttachment(file: File): ComposerAttachment {
 		size: file.size,
 		kind,
 		...(previewUrl ? { previewUrl } : {}),
+		...(sourcePath ? { sourcePath } : {}),
 		file,
 	};
 }
@@ -130,6 +139,7 @@ export async function serializeComposerAttachments(
 			name: item.name,
 			mime: item.mime,
 			data: await blobToBase64(item.file),
+			...(item.sourcePath ? { sourcePath: item.sourcePath } : {}),
 		})),
 	);
 }

@@ -30,6 +30,7 @@ export interface DesktopState {
 	skills: Array<{ name: string; source: string }>;
 	busy: boolean;
 	hasApiKey: boolean;
+	uploads?: Array<{ name: string; rel: string; sourcePath?: string }>;
 }
 
 export interface PickerItem {
@@ -427,7 +428,11 @@ export function deleteSession(
 
 export function approve(
 	bridge: BridgeClient,
-	body: { callId: string; decision: "yes" | "no" | "always"; toolName?: string },
+	body: {
+		callId: string;
+		decision: "yes" | "no" | "always" | "copy" | "original";
+		toolName?: string;
+	},
 ): Promise<{ ok: boolean }> {
 	return request(bridge, "/approve", { method: "POST", body: JSON.stringify(body) });
 }
