@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { enqueueMessage, removeQueued, setQueuedText, shiftQueue, updateQueued } from "./queue.ts";
+import {
+	enqueueMessage,
+	promoteQueued,
+	removeQueued,
+	setQueuedText,
+	shiftQueue,
+	updateQueued,
+} from "./queue.ts";
 
 describe("message queue", () => {
 	test("enqueues trimmed text and drops empty", () => {
@@ -33,5 +40,15 @@ describe("message queue", () => {
 		const shifted = shiftQueue(queue);
 		expect(shifted.next?.text).toBe("one edited");
 		expect(shifted.rest).toEqual([]);
+	});
+
+	test("promoteQueued moves an item to the front", () => {
+		const queue = [
+			{ id: "q-1", text: "one" },
+			{ id: "q-2", text: "two" },
+			{ id: "q-3", text: "three" },
+		];
+		expect(promoteQueued(queue, "q-3").map((item) => item.id)).toEqual(["q-3", "q-1", "q-2"]);
+		expect(promoteQueued(queue, "q-1")).toEqual(queue);
 	});
 });

@@ -12,9 +12,25 @@ const TOOL_LABELS: Record<string, string> = {
 	todo_write: "Updating todos",
 	grep: "Searching files",
 	glob: "Finding files",
+	task: "Handling task",
+	read_skill: "Reading skill",
+	git_status: "Checking git",
+	git_diff: "Reading diff",
+	git_log: "Reading log",
+	git_commit: "Committing",
 };
 
 const EVENT_COUNT_RE = /\s×(\d+)$/u;
+
+function prettySkillLabel(raw: string): string {
+	const id = raw.trim().split("/").pop()?.split("@").pop() ?? raw;
+	if (id === "copy-rmbc") return "RMBC";
+	if (id === "copy-harry-dry") return "Harry Dry";
+	if (id === "copy-editor") return "Copy editor";
+	if (id === "copywriting") return "Copywriting";
+	const spaced = id.replace(/[-_]+/g, " ").trim();
+	return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : raw.trim();
+}
 
 export function prettifyToolName(name: string): string {
 	const local = name.includes("__") ? (name.split("__").at(-1) ?? name) : name;
@@ -33,6 +49,17 @@ export function toolLabel(toolName: string, input: Record<string, unknown> = {})
 	if (toolName === "edit_file" && path) return `Editing ${path}`;
 	if (toolName === "read_file" && path) return `Reading ${path}`;
 	if (toolName === "exec" && command) return `Running: ${command}`;
+	if (toolName === "read_skill") {
+		const skill = typeof input.name === "string" ? input.name.trim() : "";
+		return skill ? `Reading ${prettySkillLabel(skill)}` : "Reading skill";
+	}
+	if (toolName === "task") {
+		const label = typeof input.label === "string" ? input.label.trim() : "";
+		if (label) return `Handling ${label}`;
+		const skills = Array.isArray(input.skills) ? input.skills : [];
+		const skill = typeof skills[0] === "string" ? skills[0].trim() : "";
+		return skill ? `Handling ${prettySkillLabel(skill)}` : "Handling task";
+	}
 	const known = TOOL_LABELS[toolName];
 	if (known) return known;
 	const pretty = prettifyToolName(toolName);
@@ -42,6 +69,7 @@ export function toolLabel(toolName: string, input: Record<string, unknown> = {})
 		const hostLabel = host.charAt(0).toUpperCase() + host.slice(1);
 		return `${hostLabel} ${pretty.toLowerCase()}`;
 	}
+	if (!/\s/.test(pretty) && !/ing$/i.test(pretty)) return `Using ${pretty.toLowerCase()}`;
 	return pretty;
 }
 

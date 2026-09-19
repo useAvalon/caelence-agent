@@ -140,6 +140,7 @@ export async function runTurn(
 						status: event.success ? "ok" : "fail",
 						preview: started?.preview ?? "",
 						...(event.error ? { error: event.error } : {}),
+						...(event.output ? { output: event.output } : {}),
 					});
 				}
 				emit(event);
@@ -411,6 +412,7 @@ async function invokeGuardedBody(
 		callId,
 		success,
 		...(success ? { result: finalResult.structuredContent } : {}),
+		...(success ? { output: clipToolOutput(toolResultText(finalResult)) } : {}),
 		...(errorText !== undefined ? { error: errorText } : {}),
 	});
 	return finalResult;
@@ -424,6 +426,11 @@ function previewToolInput(input: Record<string, unknown>): string {
 	const label = typeof input.label === "string" ? input.label : undefined;
 	const raw = label ?? cmd ?? path ?? pattern ?? prompt ?? JSON.stringify(input);
 	return raw.length > 80 ? `${raw.slice(0, 79)}…` : raw;
+}
+
+function clipToolOutput(text: string): string {
+	const max = 8000;
+	return text.length <= max ? text : `${text.slice(0, max)}\n…`;
 }
 
 export function buildSystemPrompt(input: {

@@ -9,6 +9,7 @@ export type ChatTranscriptLine =
 			status: "ok" | "fail";
 			preview: string;
 			error?: string;
+			output?: string;
 	  };
 
 export interface DesktopState {
@@ -81,6 +82,7 @@ export type AgentEvent =
 			callId: string;
 			success: boolean;
 			result?: unknown;
+			output?: string;
 			error?: string;
 	  }
 	| { kind: "approval_request"; callId: string; toolName: string; input: Record<string, unknown> }
@@ -334,6 +336,24 @@ export function openPath(
 	});
 }
 
+export function readFilePreview(
+	bridge: BridgeClient,
+	path: string,
+): Promise<{
+	path: string;
+	kind: "markdown" | "html" | "image" | "text";
+	text?: string;
+	mime?: string;
+	truncated?: boolean;
+}> {
+	return request(bridge, `/file-preview?path=${encodeURIComponent(path)}`);
+}
+
+export function fileBytesUrl(bridge: BridgeClient, path: string): string {
+	const params = new URLSearchParams({ path, token: bridge.token });
+	return `${bridge.url}/file-bytes?${params}`;
+}
+
 export async function openLocalFile(
 	path: string,
 	reveal = false,
@@ -470,7 +490,9 @@ export async function filesFromDroppedPaths(paths: string[]): Promise<File[]> {
 			});
 			const raw = atob(item.data);
 			const bytes = Uint8Array.from(raw, (ch) => ch.codePointAt(0) ?? 0);
-			files.push(new File([bytes], item.name, { type: item.mime }));
+			const file = new File([bytes], item.name, { type: item.mime });
+			Object.assign(file, { path: trimmed });
+			files.push(file);
 		} catch {
 			// skip unreadable paths
 		}
@@ -482,6 +504,7 @@ export interface TurnAttachmentPayload {
 	name: string;
 	mime: string;
 	data: string;
+	sourcePath?: string;
 }
 
 export async function startTurn(

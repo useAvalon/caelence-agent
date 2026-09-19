@@ -55,6 +55,28 @@ describe("applyEvent", () => {
 	test("coalesces back-to-back identical tool starts", () => {
 		const first = applyEvent([], {
 			kind: "tool_call_start",
+			toolName: "grep",
+			callId: "a",
+			input: { pattern: "one" },
+		});
+		const second = applyEvent(first, {
+			kind: "tool_call_start",
+			toolName: "grep",
+			callId: "b",
+			input: { pattern: "two" },
+		});
+		expect(second).toHaveLength(1);
+		expect(second[0]).toMatchObject({
+			type: "tool",
+			label: "Searching files",
+			count: 2,
+			callId: "b",
+		});
+	});
+
+	test("keeps each integration tool as its own row", () => {
+		const first = applyEvent([], {
+			kind: "tool_call_start",
 			toolName: "notion__notion_fetch",
 			callId: "a",
 			input: { id: "1" },
@@ -65,8 +87,25 @@ describe("applyEvent", () => {
 			callId: "b",
 			input: { id: "2" },
 		});
-		expect(second).toHaveLength(1);
-		expect(second[0]).toMatchObject({ type: "tool", label: "Notion fetch", count: 2, callId: "b" });
+		expect(second).toHaveLength(2);
+		expect(second.map((line) => line.type === "tool" && line.callId)).toEqual(["a", "b"]);
+	});
+
+	test("stores tool output on tool_call_end", () => {
+		const started = applyEvent([], {
+			kind: "tool_call_start",
+			toolName: "notion__notion_fetch",
+			callId: "a",
+			input: { id: "1" },
+		});
+		const ended = applyEvent(started, {
+			kind: "tool_call_end",
+			toolName: "notion__notion_fetch",
+			callId: "a",
+			success: true,
+			output: '{"title":"Notes"}',
+		});
+		expect(ended[0]).toMatchObject({ type: "tool", status: "ok", output: '{"title":"Notes"}' });
 	});
 
 	test("appends reasoning deltas onto a thought line", () => {

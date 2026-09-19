@@ -1,5 +1,6 @@
 import type { AgentEvent } from "./api";
 import type { AttachmentPreview } from "./composer-files";
+import { isPlatformTool, toolEventOutput } from "./platform";
 import { inputFromPreview, toolLabel } from "./tool-label";
 
 export type ToolStatus = "running" | "ok" | "fail";
@@ -64,7 +65,8 @@ export function previewInput(input: Record<string, unknown>): string {
 	const pattern = typeof input.pattern === "string" ? input.pattern : undefined;
 	const prompt = typeof input.prompt === "string" ? input.prompt : undefined;
 	const label = typeof input.label === "string" ? input.label : undefined;
-	const raw = label ?? cmd ?? path ?? pattern ?? prompt ?? JSON.stringify(input);
+	const name = typeof input.name === "string" ? input.name : undefined;
+	const raw = label ?? cmd ?? path ?? pattern ?? prompt ?? name ?? JSON.stringify(input);
 	return raw.length > 80 ? `${raw.slice(0, 79)}…` : raw;
 }
 
@@ -87,7 +89,12 @@ export function applyEvent(lines: StreamLine[], event: AgentEvent): StreamLine[]
 		case "tool_call_start": {
 			const label = toolLabel(event.toolName, event.input);
 			const last = lines[lines.length - 1];
-			if (last?.type === "tool" && last.status !== "fail" && last.label === label) {
+			if (
+				last?.type === "tool" &&
+				last.status !== "fail" &&
+				last.label === label &&
+				!isPlatformTool(event.toolName)
+			) {
 				return [
 					...lines.slice(0, -1),
 					{
@@ -117,7 +124,16 @@ export function applyEvent(lines: StreamLine[], event: AgentEvent): StreamLine[]
 		case "tool_call_end":
 			return lines.map((line) =>
 				line.type === "tool" && line.callId === event.callId
-					? { ...line, status: event.success ? "ok" : "fail", error: event.error }
+					? {
+							...line,
+							status: event.success ? "ok" : "fail",
+							error: event.error,
+							...(event.output
+								? { output: event.output }
+								: event.result !== undefined
+									? { output: toolEventOutput(event.result) }
+									: {}),
+						}
 					: line,
 			);
 		case "session_meta":
@@ -164,6 +180,7 @@ export function linesFromTranscript(
 				status: ToolStatus;
 				preview: string;
 				error?: string;
+				output?: string;
 		  }
 	>,
 ): StreamLine[] {
@@ -193,6 +210,7 @@ export function linesFromTranscript(
 			count: 1,
 			preview: message.preview,
 			error: message.error,
+			...(message.output ? { output: message.output } : {}),
 		};
 	});
 }

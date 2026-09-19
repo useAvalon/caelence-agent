@@ -12,6 +12,7 @@ export type AgentEvent =
 			callId: string;
 			success: boolean;
 			result?: unknown;
+			output?: string;
 			error?: string;
 	  }
 	| { kind: "approval_request"; callId: string; toolName: string; input: Record<string, unknown> }
