@@ -36,7 +36,7 @@ export OPENROUTER_API_KEY=…
 bunx --bun @useavalon/caelence-agent
 ```
 
-`bun add -g @useavalon/caelence-agent` installs the short names `caelence` and `caelence desktop`. Those only work when Bun already put `~/.bun/bin` on PATH. Homebrew usually does not, which is why this README starts with `bunx`. `caelence-agent` and `harness` are the same command. Run it from a git repository and that repo is the project; otherwise files are kept under `~/.harness/workspace`. `--cwd` overrides both.
+`bun add -g @useavalon/caelence-agent` installs the short names `caelence` and `caelence desktop`.
 
 ## Config
 
