@@ -7,6 +7,9 @@ name: Release
 # Auth is npm trusted publishing (OIDC), not an NPM_TOKEN secret. On npmjs.com
 # add a GitHub Actions trusted publisher for this repo and workflow filename
 # `release.yml`. npm CLI 11.5.1+ exchanges the Actions id-token at publish time.
+#
+# The version-bump PR step is best-effort: many orgs disable "Allow GitHub Actions
+# to create pull requests". Publish and tagging still succeed; merge release/v* manually.
 
 on:
   workflow_dispatch:
@@ -160,7 +163,9 @@ jobs:
             git push origin "$TAG"
           fi
           if ! gh pr list --head "$BRANCH" --base main --json number --jq '.[0].number' | grep -q '[0-9]'; then
-            gh pr create --base main --head "$BRANCH" --title "release: v${VERSION}" --body "Version bump from the release workflow. npm already published this version."
+            if ! gh pr create --base main --head "$BRANCH" --title "release: v${VERSION}" --body "Version bump from the release workflow. npm already published this version."; then
+              echo "::warning::Actions cannot open PRs in this repo (org setting). Merge ${BRANCH} into main manually: https://github.com/useAvalon/caelence-agent/compare/main...${BRANCH}"
+            fi
           fi
           PRERELEASE=""
           [ "${{ inputs.channel }}" != "stable" ] && PRERELEASE="--prerelease"
