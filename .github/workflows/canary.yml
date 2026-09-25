@@ -5,6 +5,10 @@ name: Canary Release
 # current stable version: stable 0.1.0 -> train v0.1.1, published as
 # v0.1.1-canary.0, v0.1.1-canary.1, ... under the npm "canary" dist-tag.
 #
+# Does not run on stable release syncs (release: v* commits or pushes that only
+# change package.json / bun.lock). Merging release/v* must not spawn the next
+# canary train with identical code right after a stable publish.
+#
 # Auth is npm trusted publishing (OIDC), not an NPM_TOKEN secret. On npmjs.com
 # add a GitHub Actions trusted publisher for this repo and workflow filename
 # `canary.yml`. Until the package exists on the registry, this workflow is a
@@ -17,7 +21,6 @@ on:
       - "src/**"
       - "bin/**"
       - "skills/**"
-      - "package.json"
   workflow_dispatch:
 
 permissions:
@@ -41,10 +44,52 @@ jobs:
             echo "::notice::$NAME is not on npm yet. Add a trusted publisher on npmjs.com after the first publish, then canary will run."
           fi
 
-  canary:
-    name: Publish Canary
+  precheck:
+    name: Skip release sync
     needs: guard
     if: ${{ needs.guard.outputs.enabled == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          MSG="${{ github.event.head_commit.message }}"
+          if echo "$MSG" | grep -qE '^release: v[0-9]'; then
+            echo "::notice::Skip canary: stable release sync on main"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILES=$(git diff --name-only "$BEFORE" "$AFTER")
+          if [ -z "$FILES" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          NON_META=$(echo "$FILES" | grep -vE '^(package\.json|bun\.lock)$' || true)
+          if [ -z "$NON_META" ]; then
+            echo "::notice::Skip canary: package.json or lockfile-only push"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+  canary:
+    name: Publish Canary
+    needs: [guard, precheck]
+    if: ${{ needs.guard.outputs.enabled == 'true' && needs.precheck.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
