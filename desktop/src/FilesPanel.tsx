@@ -1,4 +1,5 @@
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/csr/FolderSimple";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { type ReactElement, useEffect, useState } from "react";
 import { pruneSelected, toggleOne, toggleVisible } from "./session-select";
 
@@ -69,9 +70,10 @@ export function FilesPanel(
 							type="button"
 							className="cel-btn cel-btn--danger cel-btn--compact"
 							disabled={selected.size === 0 || removing}
+							aria-label={selected.size > 1 ? `Delete ${selected.size} files` : "Delete file"}
 							onClick={deleteSelected}
 						>
-							{selected.size > 1 ? `Delete ${selected.size}` : "Delete"}
+							<TrashIcon size={16} weight="regular" aria-hidden="true" />
 						</button>
 					</div>
 					<ul className="desk-integration-list">

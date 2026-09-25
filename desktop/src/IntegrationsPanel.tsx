@@ -1,4 +1,3 @@
-import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { useEffect, useState } from "react";
 import { errorMessage } from "../../src/core/errors";
 import {
@@ -8,51 +7,32 @@ import {
 	getIntegrations,
 	type PublicIntegration,
 } from "./api";
+import { DeskToggle } from "./DeskToggle";
 import type { ShowNotice } from "./desk-types";
 import { integrationMatches } from "./integration-search";
 import { McpPanel } from "./McpPanel";
 
 export function IntegrationActions(
 	props: Readonly<{
+		label: string;
 		pending: boolean;
 		connected: boolean;
 		onConnect: () => void;
 		onDisconnect: () => void;
 	}>,
 ): React.ReactElement {
-	if (props.pending) {
-		return (
-			<span className="desk-integration-ok">
-				<span className="cel-chip__spin" aria-hidden="true" />
-				{props.connected ? "Disconnecting" : "Connecting"}
-			</span>
-		);
-	}
-	if (props.connected) {
-		return (
-			<>
-				<span className="desk-integration-ok">
-					<CheckIcon size={16} weight="regular" aria-hidden="true" />
-					Connected
-				</span>
-				<button
-					type="button"
-					className="cel-btn cel-btn--quiet cel-btn--compact"
-					onClick={props.onDisconnect}
-				>
-					Disconnect
-				</button>
-			</>
-		);
-	}
+	const pendingLabel = props.connected ? "Disconnecting" : "Connecting";
+	const idleLabel = props.connected ? `Disconnect ${props.label}` : `Connect ${props.label}`;
 	return (
-		<button
-			type="button"
-			className="cel-btn cel-btn--secondary cel-btn--compact"
-			onClick={props.onConnect}
-		>
-			Connect
-		</button>
+		<DeskToggle
+			checked={props.connected}
+			pending={props.pending}
+			label={props.pending ? pendingLabel : idleLabel}
+			onChange={(next) => {
+				if (next) props.onConnect();
+				else props.onDisconnect();
+			}}
+		/>
 	);
 }
 
@@ -86,6 +66,7 @@ export function IntegrationRow(
 			</div>
 			<div className="desk-integration-actions">
 				<IntegrationActions
+					label={item.label}
 					pending={props.pending}
 					connected={item.connected}
 					onConnect={props.onConnect}

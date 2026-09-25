@@ -1,4 +1,5 @@
-import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+import { PushPinIcon } from "@phosphor-icons/react/dist/csr/PushPin";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { errorMessage } from "../../src/core/errors";
 import { type BridgeClient, getMemory, type PublicMemoryFact, saveMemory } from "./api";
@@ -70,15 +71,18 @@ export function MemoryPanel(
 							</div>
 							<div className="desk-integration-actions">
 								{fact.pinned ? (
-									<span className="desk-integration-ok">
-										<CheckIcon size={16} weight="regular" aria-hidden="true" />
-										Pinned
+									<span className="desk-row-icon desk-row-icon--pinned" title="Pinned">
+										<PushPinIcon size={16} weight="fill" aria-hidden="true" />
+										<span className="visually-hidden">Pinned</span>
 									</span>
 								) : (
 									<button
 										type="button"
-										className="cel-btn cel-btn--secondary cel-btn--compact"
+										className="cel-btn cel-btn--quiet cel-btn--compact"
 										disabled={pendingId === fact.id}
+										aria-label={
+											fact.scope === "user" ? "Pin to ~/.harness/AGENTS.md" : "Pin to AGENTS.md"
+										}
 										onClick={() => {
 											if (pendingId) return;
 											setPendingId(fact.id);
@@ -103,13 +107,14 @@ export function MemoryPanel(
 											})();
 										}}
 									>
-										Pin
+										<PushPinIcon size={16} weight="regular" aria-hidden="true" />
 									</button>
 								)}
 								<button
 									type="button"
 									className="cel-btn cel-btn--danger cel-btn--compact"
 									disabled={pendingId === fact.id}
+									aria-label="Delete memory"
 									onClick={() => {
 										if (pendingId) return;
 										setPendingId(fact.id);
@@ -126,7 +131,7 @@ export function MemoryPanel(
 										})();
 									}}
 								>
-									Delete
+									<TrashIcon size={16} weight="regular" aria-hidden="true" />
 								</button>
 							</div>
 						</li>
