@@ -1,5 +1,6 @@
 import { SortAscendingIcon } from "@phosphor-icons/react/dist/csr/SortAscending";
 import { SortDescendingIcon } from "@phosphor-icons/react/dist/csr/SortDescending";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
 import type { PickerItem } from "./api";
 import { type SessionSort, sessionMatches, sortSessions } from "./session-search";
@@ -108,9 +109,10 @@ export function SessionsPanel(
 							type="button"
 							className="cel-btn cel-btn--danger cel-btn--compact"
 							disabled={selected.size === 0 || removing}
+							aria-label={selected.size > 1 ? `Delete ${selected.size} sessions` : "Delete session"}
 							onClick={deleteSelected}
 						>
-							{selected.size > 1 ? `Delete ${selected.size}` : "Delete"}
+							<TrashIcon size={16} weight="regular" aria-hidden="true" />
 						</button>
 					</div>
 					{visible.length === 0 ? (

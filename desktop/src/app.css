@@ -1548,8 +1548,8 @@ p.desk-line__caption {
 }
 
 .desk-platform__action:hover {
-	background: color-mix(in srgb, #fff 10%, transparent);
-	color: #fff;
+	background: color-mix(in srgb, #fff 10%, var(--desk-term-bar));
+	color: var(--desk-term-ink);
 }
 
 .desk-platform__action:focus-visible {
@@ -2773,6 +2773,70 @@ p.desk-line__caption {
 	align-items: center;
 	gap: 8px;
 	flex: none;
+}
+
+.desk-row-icon {
+	display: inline-grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	flex: none;
+	color: var(--text-secondary);
+}
+
+.desk-row-icon--pinned {
+	color: var(--measure);
+}
+
+.desk-toggle {
+	position: relative;
+	width: 44px;
+	height: 26px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--r-full);
+	background: var(--line-2);
+	cursor: pointer;
+	flex: none;
+	transition: background 0.18s ease;
+}
+
+.desk-toggle:focus-visible {
+	outline: 2px solid var(--measure);
+	outline-offset: 2px;
+}
+
+.desk-toggle.is-on {
+	background: var(--b-600);
+}
+
+.desk-toggle:disabled {
+	opacity: 0.72;
+	cursor: not-allowed;
+}
+
+.desk-toggle__thumb {
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 20px;
+	height: 20px;
+	border-radius: var(--r-full);
+	background: #fff;
+	box-shadow: 0 1px 2px rgb(33 34 39 / 16%);
+	transition: transform 0.18s ease;
+	display: grid;
+	place-items: center;
+}
+
+.desk-toggle.is-on .desk-toggle__thumb {
+	transform: translateX(18px);
+}
+
+.desk-toggle.is-pending .desk-toggle__thumb .cel-chip__spin {
+	width: 10px;
+	height: 10px;
+	border-width: 1.5px;
 }
 
 .desk-integration-ok {

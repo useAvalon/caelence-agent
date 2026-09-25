@@ -1,4 +1,3 @@
-import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
 import { errorMessage } from "../../src/core/errors";
 import {
@@ -11,6 +10,7 @@ import {
 	type SkillsPage,
 	searchSkills,
 } from "./api";
+import { DeskToggle } from "./DeskToggle";
 import type { ShowNotice } from "./desk-types";
 import { formatSkillInstalls, omitCatalogSkill, skillMatches } from "./skill-search";
 
@@ -49,6 +49,14 @@ function skillChangeNotice(
 	return "Removed";
 }
 
+function skillToggleLabel(item: PublicSkill, pending: boolean): string {
+	const title = skillTitle(item);
+	if (pending) return `${pendingSkillLabel(item.status)} ${title}`;
+	if (item.status === "project") return `Disable ${title}`;
+	if (item.status === "user") return `Remove ${title}`;
+	return `Add ${title}`;
+}
+
 function SkillActions(
 	props: Readonly<{
 		item: PublicSkill;
@@ -58,56 +66,17 @@ function SkillActions(
 	}>,
 ): ReactElement {
 	const { item } = props;
-	if (props.pending) {
-		return (
-			<span className="desk-integration-ok">
-				<span className="cel-chip__spin" aria-hidden="true" />
-				{pendingSkillLabel(item.status)}
-			</span>
-		);
-	}
-	if (item.status === "project") {
-		return (
-			<>
-				<span className="desk-integration-ok">
-					<CheckIcon size={16} weight="regular" aria-hidden="true" />
-					In project
-				</span>
-				<button
-					type="button"
-					className="cel-btn cel-btn--quiet cel-btn--compact"
-					onClick={props.onRemove}
-				>
-					Disable
-				</button>
-			</>
-		);
-	}
-	if (item.status === "user") {
-		return (
-			<>
-				<span className="desk-integration-ok">
-					<CheckIcon size={16} weight="regular" aria-hidden="true" />
-					Added
-				</span>
-				<button
-					type="button"
-					className="cel-btn cel-btn--quiet cel-btn--compact"
-					onClick={props.onRemove}
-				>
-					Remove
-				</button>
-			</>
-		);
-	}
+	const on = item.status === "user" || item.status === "project";
 	return (
-		<button
-			type="button"
-			className="cel-btn cel-btn--secondary cel-btn--compact"
-			onClick={props.onAdd}
-		>
-			Add
-		</button>
+		<DeskToggle
+			checked={on}
+			pending={props.pending}
+			label={skillToggleLabel(item, props.pending)}
+			onChange={(next) => {
+				if (next) props.onAdd();
+				else props.onRemove();
+			}}
+		/>
 	);
 }
 
