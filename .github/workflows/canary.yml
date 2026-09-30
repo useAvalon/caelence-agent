@@ -56,13 +56,16 @@ jobs:
         with:
           fetch-depth: 0
       - id: check
+        env:
+          # Avoid injecting the message into the script body (backticks run as shell).
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          MSG="${{ github.event.head_commit.message }}"
-          if echo "$MSG" | grep -qE '^release: v[0-9]'; then
+          MSG="${COMMIT_MSG}"
+          if printf '%s' "$MSG" | grep -qE '^release: v[0-9]'; then
             echo "::notice::Skip canary: stable release sync on main"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
