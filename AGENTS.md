@@ -24,7 +24,7 @@ Do not commit `.env`, `.harness/`, OpenRouter keys, or OAuth client secrets. Des
 | `src/` | Runtime, CLI, skills, integrations, desktop HTTP bridge |
 | `desktop/` | Tauri webview. It talks to a loopback bridge; do not open that URL in a browser |
 | `skills/` | Bundled catalog shipped with the package |
-| `bin/harness.ts` | CLI (`caelence`, `caelence-agent`, and `harness` are the same bin) |
+| `bin/harness.ts` | CLI entry (`caelence` and `caelence-agent` on npm) |
 
 `createHarness` in `src/runtime.ts` is the shared turn loop. Tests sit next to the code they cover (`*.test.ts`). Biome is the formatter and linter; it runs on staged files at commit.
 

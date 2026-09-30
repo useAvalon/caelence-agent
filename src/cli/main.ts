@@ -41,8 +41,8 @@ function printHelp(): void {
 	process.stdout.write(`${PRODUCT_NAME}
 
 Usage:
-  ${CLI_NAME}                 Terminal UI
-  ${CLI_NAME} desktop         Open the desktop window
+  ${CLI_NAME}                 Terminal UI (same binary as caelence-agent)
+  ${CLI_NAME} desktop         Desktop window (Tauri)
   ${CLI_NAME} chat -m <text>  One-shot turn
   ${CLI_NAME} eval [name]     Run an eval suite (list if omitted)
   ${CLI_NAME} experiment      Run the local regression dataset (no Langfuse required)
@@ -384,7 +384,7 @@ async function runExperiment(cwd: string): Promise<number> {
 async function runChat(parsed: ParsedCli, mode: AgentMode | undefined): Promise<number> {
 	const message = parsed.message;
 	if (!message) {
-		process.stderr.write("harness chat -m <text>\n");
+		process.stderr.write(`${CLI_NAME} chat -m <text>\n`);
 		return 1;
 	}
 	const tty = Boolean(process.stdin.isTTY);
@@ -467,10 +467,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 	const handler = COMMANDS[cmd];
 	if (handler) return handler(parsed);
 	if (cmd.startsWith("-")) {
-		process.stderr.write(`Unknown flag ${cmd}. Try harness help.\n`);
+		process.stderr.write(`Unknown flag ${cmd}. Try ${CLI_NAME} help.\n`);
 		return 1;
 	}
-	process.stderr.write(`Unknown command ${cmd}. Try harness help.\n`);
+	process.stderr.write(`Unknown command ${cmd}. Try ${CLI_NAME} help.\n`);
 	return 1;
 }
 
