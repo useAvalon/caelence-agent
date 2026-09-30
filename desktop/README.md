@@ -8,7 +8,7 @@ Needs bun and Rust. System `rustup` works. A local toolchain can live in `deskto
 
 ```bash
 # from this repo, or any project
-bun bin/harness.ts desktop
+bun run desktop
 ```
 
 Or:
@@ -23,4 +23,4 @@ Paste an OpenRouter key in Settings after the window opens. You do not need to e
 
 `HARNESS_CWD` is the project the agent opens.
 
-The Ink TUI: `bun bin/harness.ts` (same as `caelence`).
+The Ink TUI: `bun start` or `caelence` from the package.

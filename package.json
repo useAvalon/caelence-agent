@@ -21,8 +21,7 @@
   },
   "bin": {
     "caelence": "./bin/harness.ts",
-    "caelence-agent": "./bin/harness.ts",
-    "harness": "./bin/harness.ts"
+    "caelence-agent": "./bin/harness.ts"
   },
   "exports": {
     ".": "./src/index.ts",

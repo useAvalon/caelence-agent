@@ -32,11 +32,12 @@ import {
 	resolveSlashSubmit,
 } from "./slash.ts";
 import { applyPickerChoice, dispatchSlash, type SlashPickerKind } from "./slash-dispatch.ts";
-import type { Theme } from "./theme.ts";
+import { resolveTheme, type Theme } from "./theme.ts";
 import { clipLabel, sidebarWidth, tuiChromeRows, visibleTranscriptRows } from "./tui-layout.ts";
 import { turnProgressLabel } from "./tui-progress.ts";
 import { enterAltScreen } from "./tui-screen.ts";
 import type { StreamLine, ToolStatus, TurnToolLine } from "./tui-stream.ts";
+import { resolveTuiThemeEnv } from "./tui-terminal-probe.ts";
 import { TuiTextInput } from "./tui-text-input.tsx";
 import { summarizeTurnTools, takeLinesForRowBudget } from "./tui-transcript.ts";
 
@@ -179,10 +180,7 @@ function Header(
 		<Box flexDirection="column">
 			<Box>
 				<Text color={color}>{mark}</Text>
-				<Text color={props.theme.ink} bold>
-					{" "}
-					{PRODUCT_NAME}
-				</Text>
+				<Text bold> {PRODUCT_NAME}</Text>
 				<Text color={props.theme.muted}>
 					{" "}
 					{props.title} · {props.mode} · {label}
@@ -228,7 +226,7 @@ function Sidebar(
 				items.map((item) => (
 					<Text
 						key={item.id}
-						color={item.id === props.currentId ? props.theme.brand : props.theme.ink}
+						color={item.id === props.currentId ? props.theme.brand : undefined}
 						wrap="truncate"
 					>
 						{item.id === props.currentId ? "› " : "  "}
@@ -448,13 +446,13 @@ function ApprovalCard(props: Readonly<{ theme: Theme; req: ApprovalRequest }>): 
 			</Text>
 			{upload ? (
 				<>
-					<Text color={props.theme.ink}>Copy: {copyPath}</Text>
-					<Text color={props.theme.ink}>Original: {originalPath}</Text>
+					<Text>Copy: {copyPath}</Text>
+					<Text>Original: {originalPath}</Text>
 					<Text color={props.theme.muted}>c copy · o original · n cancel</Text>
 				</>
 			) : (
 				<>
-					<Text color={props.theme.ink}>{command}</Text>
+					<Text>{command}</Text>
 					<Text color={props.theme.muted}>y approve · n deny · a always this session</Text>
 				</>
 			)}
@@ -652,9 +650,8 @@ function ComposerFooter(
 	);
 }
 
-function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
-	const { harness } = props;
-	const theme = harness.theme;
+function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.ReactElement {
+	const { harness, theme } = props;
 	const { exit } = useApp();
 	const [lines, setLines] = useState<StreamLine[]>([]);
 	const [turnTools, setTurnTools] = useState<TurnToolLine[]>([]);
@@ -1037,9 +1034,11 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 }
 
 export async function startTui(harness: HarnessRuntime): Promise<void> {
+	const env = await resolveTuiThemeEnv({ ...process.env });
+	const theme = resolveTheme(harness.config.theme, env);
 	const restore = enterAltScreen();
 	try {
-		const instance = render(<App harness={harness} />, { patchConsole: true });
+		const instance = render(<App harness={harness} theme={theme} />, { patchConsole: true });
 		await instance.waitUntilExit();
 	} finally {
 		restore();
