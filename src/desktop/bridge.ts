@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
+import { resolveAgentCwd } from "../agent-cwd.ts";
 import { mediaModelLabel } from "../cli/media-models.ts";
 import { HARNESS_MODELS, modelPickerItems } from "../cli/models.ts";
 import {
@@ -1056,7 +1057,10 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 }
 
 export async function main(): Promise<void> {
-	const cwd = process.env.HARNESS_CWD?.trim() || process.cwd();
+	const cwd = resolveAgentCwd({
+		start: process.env.HARNESS_CWD?.trim() || process.cwd(),
+		explicit: process.env.HARNESS_CWD_EXPLICIT?.trim(),
+	});
 	const { ready } = await startDesktopBridge({ cwd });
 	process.stdout.write(`HARNESS_READY=${JSON.stringify(ready)}\n`);
 }

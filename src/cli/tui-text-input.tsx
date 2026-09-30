@@ -2,37 +2,66 @@ import { Text, useInput } from "ink";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { applyTextInputKey } from "./tui-text-input.ts";
+import { composerVisibleValue } from "./tui-text-input-display.ts";
+
+const PROMPT = "> ";
 
 export function TuiTextInput(
 	props: Readonly<{
 		value: string;
+		width: number;
+		enabled?: boolean;
+		slashOpen?: boolean;
+		onSlashUp?: () => void;
+		onSlashDown?: () => void;
+		onSlashTab?: () => void;
 		onChange: (value: string) => void;
 		onSubmit: (value: string) => void;
 	}>,
 ): React.ReactElement {
+	const enabled = props.enabled !== false;
+	const [draft, setDraft] = useState(props.value);
 	const [cursor, setCursor] = useState(props.value.length);
 
 	useEffect(() => {
-		setCursor((current) => Math.min(Math.max(current, 0), props.value.length));
+		setDraft(props.value);
+		setCursor(props.value.length);
 	}, [props.value]);
 
-	useInput((input, key) => {
-		const next = applyTextInputKey(props.value, cursor, input, key);
-		if (!next) return;
-		if (next.submit) {
-			props.onSubmit(next.value);
-			return;
-		}
-		if (next.value !== props.value) props.onChange(next.value);
-		setCursor(next.cursor);
-	});
+	useInput(
+		(input, key) => {
+			if (props.slashOpen) {
+				if (key.upArrow) {
+					props.onSlashUp?.();
+					return;
+				}
+				if (key.downArrow) {
+					props.onSlashDown?.();
+					return;
+				}
+				if (key.tab) {
+					props.onSlashTab?.();
+					return;
+				}
+			}
+			const next = applyTextInputKey(draft, cursor, input, key);
+			if (!next) return;
+			if (next.submit) {
+				props.onSubmit(next.value);
+				return;
+			}
+			setDraft(next.value);
+			setCursor(next.cursor);
+			if (next.value !== props.value) props.onChange(next.value);
+		},
+		{ isActive: enabled },
+	);
 
-	const atEnd = cursor >= props.value.length;
+	const visible = composerVisibleValue(draft, props.width, PROMPT.length);
 	return (
-		<Text>
-			{props.value.slice(0, cursor)}
-			<Text inverse>{atEnd ? " " : props.value.slice(cursor, cursor + 1)}</Text>
-			{atEnd ? null : props.value.slice(cursor + 1)}
+		<Text wrap="truncate">
+			{PROMPT}
+			{visible}
 		</Text>
 	);
 }

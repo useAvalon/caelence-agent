@@ -293,7 +293,24 @@ export function DeskMain(
 				<header className="desk-bar">
 					<div className="desk-id">
 						<h1>{mainViewTitle(view)}</h1>
-						{view === "chat" && desk.state.spend ? <p>{desk.state.spend}</p> : null}
+						{view === "chat" ? (
+							<p className="desk-project" title={desk.state.cwd}>
+								<button
+									type="button"
+									className="desk-project-btn"
+									onClick={() => {
+										void openLocalFile(desk.state.cwd, true, desk.bridge).catch((err: unknown) => {
+											desk.noticeError(err);
+										});
+									}}
+								>
+									{homePath(desk.state.cwd)}
+								</button>
+								{desk.state.spend ? (
+									<span className="desk-project-spend">{desk.state.spend}</span>
+								) : null}
+							</p>
+						) : null}
 					</div>
 				</header>
 				<div className="desk-stage">

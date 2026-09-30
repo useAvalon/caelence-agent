@@ -114,13 +114,18 @@ function printEvent(event: AgentEvent): void {
 	}
 }
 
-function desktopToolchainEnv(desktopDir: string, cwd: string): NodeJS.ProcessEnv {
+function desktopToolchainEnv(
+	desktopDir: string,
+	cwd: string,
+	cwdExplicit: boolean,
+): NodeJS.ProcessEnv {
 	const cargoHome = resolve(desktopDir, ".toolchain/cargo");
 	const rustupHome = resolve(desktopDir, ".toolchain/rustup");
 	const cargoBin = resolve(cargoHome, "bin");
 	const bunDir = dirname(process.execPath);
 	const systemCargoBin = resolve(homedir(), ".cargo/bin");
 	const env: NodeJS.ProcessEnv = { ...process.env, HARNESS_CWD: cwd };
+	if (cwdExplicit) env.HARNESS_CWD_EXPLICIT = cwd;
 	const pathDirs = [bunDir];
 	if (existsSync(resolve(cargoBin, "cargo"))) {
 		env.CARGO_HOME = cargoHome;
@@ -195,7 +200,8 @@ function agentCwd(parsed: ParsedCli): string {
 	});
 }
 
-async function runDesktop(cwd: string): Promise<number> {
+async function runDesktop(parsed: ParsedCli): Promise<number> {
+	const cwd = agentCwd(parsed);
 	const desktopDir = resolve(fileURLToPath(new URL("../../desktop", import.meta.url)));
 	if (!existsSync(resolve(desktopDir, "package.json"))) {
 		process.stderr.write(
@@ -203,7 +209,7 @@ async function runDesktop(cwd: string): Promise<number> {
 		);
 		return 1;
 	}
-	const env = desktopToolchainEnv(desktopDir, cwd);
+	const env = desktopToolchainEnv(desktopDir, cwd, parsed.cwdExplicit);
 	if (!hasCargo(env)) {
 		process.stderr.write(
 			"Rust is required for the desktop window. Install rustup from https://rustup.rs then run caelence desktop again.\n",
@@ -430,7 +436,7 @@ const COMMANDS: Record<string, (parsed: ParsedCli) => Promise<number>> = {
 		printHelp();
 		return 0;
 	},
-	desktop: async (parsed) => runDesktop(agentCwd(parsed)),
+	desktop: async (parsed) => runDesktop(parsed),
 	init: async (parsed) => runInit(parsed),
 	skill: async (parsed) => runSkill(parsed.cwd, parsed.rest),
 	eval: async (parsed) => runEval(parsed.cwd, parsed.rest),

@@ -8,7 +8,10 @@ describe("tui text input", () => {
 			value: "ab",
 			cursor: 2,
 		});
-		expect(applyTextInputKey("abc", 1, "", { delete: true })).toEqual({ value: "ac", cursor: 1 });
+		expect(applyTextInputKey("abc", 3, "", { delete: true })).toEqual({
+			value: "ab",
+			cursor: 2,
+		});
 		expect(applyTextInputKey("abc", 3, "", { leftArrow: true })).toEqual({
 			value: "abc",
 			cursor: 2,
@@ -19,5 +22,14 @@ describe("tui text input", () => {
 			submit: true,
 		});
 		expect(applyTextInputKey("hi", 2, "", { upArrow: true })).toBeUndefined();
+	});
+
+	test("treats terminal delete bytes as backspace", () => {
+		expect(applyTextInputKey("abc", 3, "\x7f", {})).toEqual({ value: "ab", cursor: 2 });
+		expect(applyTextInputKey("abc", 2, "\b", {})).toEqual({ value: "ac", cursor: 1 });
+	});
+
+	test("flattens pasted newlines to spaces", () => {
+		expect(applyTextInputKey("a", 1, "b\nc", {})).toEqual({ value: "ab c", cursor: 4 });
 	});
 });

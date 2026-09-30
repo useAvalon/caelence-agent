@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { resolveAgentCwd } from "../../src/agent-cwd.ts";
 
 const desktopDir = resolve(import.meta.dir, "..");
 const cargoHome = resolve(desktopDir, ".toolchain/cargo");
@@ -13,8 +14,8 @@ if (existsSync(resolve(cargoBin, "cargo"))) {
 	env.RUSTUP_HOME = rustupHome;
 	env.PATH = `${cargoBin}:${env.PATH ?? ""}`;
 }
-if (!env.HARNESS_CWD) {
-	env.HARNESS_CWD = resolve(desktopDir, "..");
+if (!env.HARNESS_CWD?.trim()) {
+	env.HARNESS_CWD = resolveAgentCwd({ start: process.cwd() });
 }
 
 function run(bin: string, args: string[]): Promise<number> {

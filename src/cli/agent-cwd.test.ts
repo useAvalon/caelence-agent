@@ -48,6 +48,23 @@ describe("resolveAgentCwd", () => {
 		}
 	});
 
+	test("falls back to the last project cwd before standalone workspace", async () => {
+		const last = await tempDir("agent-cwd-last-");
+		const harnessHome = await tempDir("agent-cwd-last-harness-");
+		const scratch = await tempDir("agent-cwd-last-scratch-");
+		try {
+			await mkdir(join(last, ".git"));
+			const env = { HOME: scratch, HARNESS_HOME: harnessHome };
+			const { rememberProjectCwd } = await import("../agent-cwd.ts");
+			rememberProjectCwd(last, env);
+			expect(resolveAgentCwd({ start: scratch, env })).toBe(last);
+		} finally {
+			await rm(last, { recursive: true, force: true });
+			await rm(harnessHome, { recursive: true, force: true });
+			await rm(scratch, { recursive: true, force: true });
+		}
+	});
+
 	test("home is not a project even with .git", async () => {
 		const home = await tempDir("agent-cwd-home-");
 		const harnessHome = await tempDir("agent-cwd-home-harness-");
