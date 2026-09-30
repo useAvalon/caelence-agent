@@ -505,6 +505,38 @@ body {
 	white-space: nowrap;
 }
 
+.desk-project {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.desk-project-btn {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	font: inherit;
+	color: inherit;
+	cursor: pointer;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+	flex: 1;
+	text-align: left;
+}
+
+.desk-project-btn:hover {
+	color: var(--text);
+	text-decoration: underline;
+}
+
+.desk-project-spend {
+	flex-shrink: 0;
+}
+
 .desk-bar .cel-chip {
 	padding: 3px 8px;
 	gap: 6px;

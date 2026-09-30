@@ -2,8 +2,17 @@ export function sidebarWidth(columns: number): number {
 	return columns >= 88 ? 26 : 0;
 }
 
+export const TUI_HEADER_ROWS = 2;
+export const TUI_COMPOSER_ROWS = 2;
+export const TUI_ACTIVITY_ROWS = 1;
+
+export function visibleTranscriptRows(rows: number, chromeRows: number): number {
+	return Math.max(4, rows - Math.max(0, chromeRows));
+}
+
+/** @deprecated Line count; prefer visibleTranscriptRows with row-budget clipping. */
 export function visibleTranscriptCount(rows: number, chromeRows: number): number {
-	return Math.max(3, rows - Math.max(0, chromeRows));
+	return visibleTranscriptRows(rows, chromeRows);
 }
 
 export function takeVisibleLines<T>(lines: T[], count: number): T[] {
@@ -22,12 +31,12 @@ export function tuiChromeRows(input: {
 	approval: boolean;
 	pickerCount: number;
 	slashCount: number;
+	activity?: boolean;
 }): number {
-	return (
-		3 +
-		2 +
-		(input.approval ? 4 : 0) +
-		(input.pickerCount > 0 ? Math.min(input.pickerCount, 8) + 2 : 0) +
-		(input.slashCount > 0 ? Math.min(input.slashCount, 8) + 1 : 0)
-	);
+	let rows = TUI_HEADER_ROWS + TUI_COMPOSER_ROWS;
+	if (input.activity) rows += TUI_ACTIVITY_ROWS;
+	if (input.approval) rows += 5;
+	if (input.pickerCount > 0) rows += Math.min(input.pickerCount, 8) + 2;
+	if (input.slashCount > 0) rows += Math.min(input.slashCount, 8) + 1;
+	return rows;
 }

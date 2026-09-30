@@ -14,7 +14,7 @@ describe("tui layout", () => {
 	});
 
 	test("keeps a minimum transcript viewport", () => {
-		expect(visibleTranscriptCount(12, 20)).toBe(3);
+		expect(visibleTranscriptCount(12, 20)).toBe(4);
 		expect(visibleTranscriptCount(40, 10)).toBe(30);
 	});
 
@@ -27,7 +27,9 @@ describe("tui layout", () => {
 	});
 
 	test("counts chrome for approval and pickers", () => {
-		expect(tuiChromeRows({ approval: false, pickerCount: 0, slashCount: 0 })).toBe(5);
-		expect(tuiChromeRows({ approval: true, pickerCount: 3, slashCount: 0 })).toBe(14);
+		expect(tuiChromeRows({ approval: false, pickerCount: 0, slashCount: 0 })).toBe(4);
+		expect(tuiChromeRows({ approval: true, pickerCount: 3, slashCount: 0, activity: true })).toBe(
+			15,
+		);
 	});
 });

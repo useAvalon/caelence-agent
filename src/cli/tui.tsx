@@ -33,33 +33,12 @@ import {
 } from "./slash.ts";
 import { applyPickerChoice, dispatchSlash, type SlashPickerKind } from "./slash-dispatch.ts";
 import type { Theme } from "./theme.ts";
-import {
-	clipLabel,
-	sidebarWidth,
-	takeVisibleLines,
-	tuiChromeRows,
-	visibleTranscriptCount,
-} from "./tui-layout.ts";
+import { clipLabel, sidebarWidth, tuiChromeRows, visibleTranscriptRows } from "./tui-layout.ts";
+import { turnProgressLabel } from "./tui-progress.ts";
 import { enterAltScreen } from "./tui-screen.ts";
+import type { StreamLine, ToolStatus, TurnToolLine } from "./tui-stream.ts";
 import { TuiTextInput } from "./tui-text-input.tsx";
-
-type ToolStatus = "running" | "ok" | "fail";
-
-type StreamLine =
-	| { key: string; type: "user"; text: string }
-	| { key: string; type: "assistant"; text: string }
-	| {
-			key: string;
-			type: "tool";
-			name: string;
-			callId: string;
-			status: ToolStatus;
-			preview: string;
-			error?: string;
-	  }
-	| { key: string; type: "system"; text: string }
-	| { key: string; type: "error"; text: string }
-	| { key: string; type: "todos"; text: string };
+import { summarizeTurnTools, takeLinesForRowBudget } from "./tui-transcript.ts";
 
 type UiStatus = "idle" | "running" | "approval" | "picker";
 
@@ -89,30 +68,16 @@ function applyEvent(lines: StreamLine[], event: AgentEvent): StreamLine[] {
 			}
 			return [...lines, { key: `a-${lines.length}`, type: "assistant", text: event.text }];
 		}
-		case "reasoning_delta":
-			return lines;
+		case "reasoning_delta": {
+			const last = lines.at(-1);
+			if (last?.type === "thought") {
+				return [...lines.slice(0, -1), { ...last, text: last.text + event.text }];
+			}
+			return [...lines, { key: `th-${lines.length}`, type: "thought", text: event.text }];
+		}
 		case "tool_call_start":
-			return [
-				...lines,
-				{
-					key: event.callId,
-					type: "tool",
-					name: event.toolName,
-					callId: event.callId,
-					status: "running",
-					preview: previewInput(event.input),
-				},
-			];
 		case "tool_call_end":
-			return lines.map((line) =>
-				line.type === "tool" && line.callId === event.callId
-					? {
-							...line,
-							status: event.success ? "ok" : "fail",
-							error: event.error,
-						}
-					: line,
-			);
+			return lines;
 		case "session_meta":
 			return lines;
 		case "error":
@@ -131,6 +96,32 @@ function applyEvent(lines: StreamLine[], event: AgentEvent): StreamLine[] {
 		case "approval_request":
 			return lines;
 	}
+}
+
+function applyTurnToolEvent(tools: TurnToolLine[], event: AgentEvent): TurnToolLine[] {
+	if (event.kind === "tool_call_start") {
+		return [
+			...tools,
+			{
+				callId: event.callId,
+				name: event.toolName,
+				status: "running",
+				preview: previewInput(event.input),
+			},
+		];
+	}
+	if (event.kind === "tool_call_end") {
+		return tools.map((tool) =>
+			tool.callId === event.callId
+				? {
+						...tool,
+						status: event.success ? "ok" : "fail",
+						error: event.error,
+					}
+				: tool,
+		);
+	}
+	return tools;
 }
 
 function modelLabel(id: string): string {
@@ -158,7 +149,7 @@ function useTerminalSize(): { columns: number; rows: number } {
 }
 
 function headerStatusMark(status: UiStatus): string {
-	if (status === "running") return "·";
+	if (status === "running") return "…";
 	if (status === "approval") return "!";
 	return "●";
 }
@@ -264,30 +255,55 @@ function toolStatusColor(status: ToolStatus, theme: Theme): string {
 	return theme.danger;
 }
 
-function StreamLineView(props: Readonly<{ theme: Theme; line: StreamLine }>): React.ReactElement {
+function StreamLineView(
+	props: Readonly<{ theme: Theme; line: StreamLine; width: number }>,
+): React.ReactElement {
 	const { theme, line } = props;
+	const width = Math.max(1, props.width);
 	if (line.type === "user") {
 		return (
-			<Box marginBottom={1}>
-				<Text color={theme.brand}>› </Text>
-				<Text color={theme.ink}>{line.text}</Text>
+			<Box flexDirection="column" marginTop={1} marginBottom={0} width={width} overflow="hidden">
+				<Text color={theme.brand} bold>
+					You
+				</Text>
+				<Text color={theme.ink} wrap="wrap">
+					{line.text}
+				</Text>
 			</Box>
 		);
 	}
 	if (line.type === "assistant") {
 		return (
-			<Box marginBottom={1}>
-				<Text color={theme.ink}>{plainTerminalText(line.text)}</Text>
+			<Box flexDirection="column" marginTop={1} marginBottom={0} width={width} overflow="hidden">
+				<Text color={theme.muted} bold>
+					Agent
+				</Text>
+				<Text color={theme.ink} wrap="wrap">
+					{plainTerminalText(line.text)}
+				</Text>
+			</Box>
+		);
+	}
+	if (line.type === "thought") {
+		return (
+			<Box flexDirection="column" marginTop={1} width={width} overflow="hidden">
+				<Text color={theme.muted} wrap="truncate">
+					{clipLabel(line.text.replace(/\s+/g, " ").trim(), width)}
+				</Text>
 			</Box>
 		);
 	}
 	if (line.type === "tool") {
 		return (
-			<Box flexDirection="column" marginBottom={1}>
-				<Text color={toolStatusColor(line.status, theme)}>
+			<Box flexDirection="column" marginBottom={1} width={width} overflow="hidden">
+				<Text color={toolStatusColor(line.status, theme)} wrap="truncate">
 					{toolStatusMark(line.status)} {line.name} <Text color={theme.muted}>{line.preview}</Text>
 				</Text>
-				{line.error ? <Text color={theme.danger}>{line.error}</Text> : null}
+				{line.error ? (
+					<Text color={theme.danger} wrap="truncate">
+						{line.error}
+					</Text>
+				) : null}
 			</Box>
 		);
 	}
@@ -312,14 +328,34 @@ function StreamLineView(props: Readonly<{ theme: Theme; line: StreamLine }>): Re
 	);
 }
 
-function StreamView(props: Readonly<{ theme: Theme; lines: StreamLine[] }>): React.ReactElement {
+function StreamView(
+	props: Readonly<{ theme: Theme; lines: StreamLine[]; width: number; height: number }>,
+): React.ReactElement {
 	return (
-		<Box flexDirection="column">
+		<Box
+			flexDirection="column"
+			width={props.width}
+			height={props.height}
+			overflow="hidden"
+			flexShrink={0}
+		>
 			{props.lines.map((line) => (
-				<Box key={line.key}>
-					<StreamLineView theme={props.theme} line={line} />
+				<Box key={line.key} width={props.width} overflow="hidden" flexShrink={0}>
+					<StreamLineView theme={props.theme} line={line} width={props.width} />
 				</Box>
 			))}
+		</Box>
+	);
+}
+
+function TurnProgressBar(
+	props: Readonly<{ theme: Theme; label: string; width: number }>,
+): React.ReactElement {
+	return (
+		<Box width={props.width} height={1} overflow="hidden" flexShrink={0}>
+			<Text color={props.theme.action} wrap="truncate">
+				… {props.label}
+			</Text>
 		</Box>
 	);
 }
@@ -453,18 +489,6 @@ function approvalDecision(
 	return undefined;
 }
 
-function slashMenuNav(
-	key: { upArrow: boolean; downArrow: boolean; tab: boolean },
-	slashOpen: boolean,
-	count: number,
-): "up" | "down" | "tab" | undefined {
-	if (!slashOpen || count === 0) return undefined;
-	if (key.upArrow) return "up";
-	if (key.downArrow) return "down";
-	if (key.tab) return "tab";
-	return undefined;
-}
-
 function applyPickerKeys(
 	picker: PickerState,
 	key: {
@@ -503,53 +527,115 @@ function applyPickerKeys(
 	}
 }
 
-function trySlashMenuInput(
-	key: { upArrow: boolean; downArrow: boolean; tab: boolean },
-	slashOpen: boolean,
-	slashItems: ReturnType<typeof filterSlashCommands>,
-	slashIndex: number,
-	setSlashIndex: (fn: (index: number) => number) => void,
-	setValue: (value: string) => void,
+function applyTuiApprovalKey(
+	input: string,
+	key: { escape: boolean },
+	pending: { req: ApprovalRequest; resolve: (ok: boolean) => void },
+	harness: HarnessRuntime,
+	setPending: (value: null) => void,
+	setStatus: (status: UiStatus) => void,
 ): void {
-	const slashKey = slashMenuNav(key, slashOpen, slashItems.length);
-	if (slashKey === "up") {
-		setSlashIndex((index) => stepIndex(index, slashItems.length, -1));
+	const decision = approvalDecision(input, key.escape, isUploadEditRequest(pending.req));
+	if (!decision) return;
+	if (decision === "always") harness.allowRiskyAlways(pending.req.toolName);
+	if (decision === "original") {
+		const original = pending.req.input.originalPath;
+		if (typeof original === "string" && original.trim()) {
+			pending.req.input.path = original;
+		}
+	}
+	pending.resolve(decision !== "no");
+	setPending(null);
+	setStatus("running");
+}
+
+function handleOpenPickerInput(
+	open: PickerState,
+	key: {
+		escape: boolean;
+		upArrow: boolean;
+		downArrow: boolean;
+		tab: boolean;
+		shift: boolean;
+		return: boolean;
+	},
+	ctx: {
+		pickerEscTimer: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
+		pickerRef: React.MutableRefObject<PickerState | null>;
+		setPicker: (
+			value: PickerState | null | ((current: PickerState | null) => PickerState | null),
+		) => void;
+		setStatus: (status: UiStatus) => void;
+		setValue: (value: string) => void;
+		confirmPicker: (state: PickerState) => void;
+	},
+): void {
+	const nav = inkPickerNav(key);
+	if (nav === "esc") {
+		if (ctx.pickerEscTimer.current) clearTimeout(ctx.pickerEscTimer.current);
+		ctx.pickerEscTimer.current = setTimeout(() => {
+			ctx.pickerEscTimer.current = null;
+			const still = ctx.pickerRef.current;
+			if (!still) return;
+			applyPickerKeys(
+				still,
+				{
+					escape: true,
+					upArrow: false,
+					downArrow: false,
+					tab: false,
+					shift: false,
+					return: false,
+				},
+				ctx.setPicker,
+				ctx.setStatus,
+				ctx.setValue,
+				ctx.confirmPicker,
+			);
+		}, 40);
 		return;
 	}
-	if (slashKey === "down") {
-		setSlashIndex((index) => stepIndex(index, slashItems.length, 1));
-		return;
+	if (ctx.pickerEscTimer.current) {
+		clearTimeout(ctx.pickerEscTimer.current);
+		ctx.pickerEscTimer.current = null;
 	}
-	if (slashKey === "tab") {
-		const selected = slashItems[slashIndex] ?? slashItems[0];
-		if (selected) setValue(completeSlashCommand(selected));
-	}
+	applyPickerKeys(open, key, ctx.setPicker, ctx.setStatus, ctx.setValue, ctx.confirmPicker);
 }
 
 function ComposerFooter(
 	props: Readonly<{
 		theme: Theme;
 		status: UiStatus;
-		statusLabel: string;
 		value: string;
+		width: number;
 		onChange: (value: string) => void;
 		onSubmit: (value: string) => void;
 		slashOpen: boolean;
 		slashItems: ReturnType<typeof filterSlashCommands>;
 		slashIndex: number;
-		mediaLine: string;
+		onSlashUp: () => void;
+		onSlashDown: () => void;
+		onSlashTab: () => void;
+		hintLine: string;
 		pickerOpen: boolean;
 	}>,
 ): React.ReactElement | null {
 	if (props.pickerOpen || props.status === "picker") return null;
-	if (props.status !== "idle") {
-		return <Text color={props.theme.muted}>{props.statusLabel}</Text>;
-	}
+	const typingEnabled = props.status !== "approval";
 	return (
-		<Box flexDirection="column">
-			<Box>
-				<Text color={props.theme.brand}>› </Text>
-				<TuiTextInput value={props.value} onChange={props.onChange} onSubmit={props.onSubmit} />
+		<Box flexDirection="column" width={props.width} flexShrink={0} overflow="hidden">
+			<Box width={props.width} overflow="hidden">
+				<TuiTextInput
+					value={props.value}
+					width={props.width}
+					enabled={typingEnabled}
+					slashOpen={props.slashOpen}
+					onSlashUp={props.onSlashUp}
+					onSlashDown={props.onSlashDown}
+					onSlashTab={props.onSlashTab}
+					onChange={props.onChange}
+					onSubmit={props.onSubmit}
+				/>
 			</Box>
 			{props.slashOpen ? (
 				<SlashMenu
@@ -558,7 +644,9 @@ function ComposerFooter(
 					selected={Math.min(props.slashIndex, Math.max(props.slashItems.length - 1, 0))}
 				/>
 			) : (
-				<Text color={props.theme.line}>{props.mediaLine}</Text>
+				<Text color={props.theme.muted} wrap="truncate">
+					{props.hintLine}
+				</Text>
 			)}
 		</Box>
 	);
@@ -569,6 +657,8 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 	const theme = harness.theme;
 	const { exit } = useApp();
 	const [lines, setLines] = useState<StreamLine[]>([]);
+	const [turnTools, setTurnTools] = useState<TurnToolLine[]>([]);
+	const [progressTick, setProgressTick] = useState(0);
 	const [value, setValue] = useState("");
 	const [status, setStatus] = useState<UiStatus>("idle");
 	const [title, setTitle] = useState("New chat");
@@ -601,6 +691,14 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 	useEffect(() => {
 		setSlashIndex(0);
 	}, [value]);
+
+	useEffect(() => {
+		if (status !== "running") return;
+		const timer = setInterval(() => {
+			setProgressTick((tick) => tick + 1);
+		}, 450);
+		return () => clearInterval(timer);
+	}, [status]);
 
 	useEffect(() => {
 		if (!harness.hasApiKey) return;
@@ -692,58 +790,22 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 	useInput(
 		(input, key) => {
 			if (status === "approval" && pending) {
-				const decision = approvalDecision(input, key.escape, isUploadEditRequest(pending.req));
-				if (!decision) return;
-				if (decision === "always") harness.allowRiskyAlways(pending.req.toolName);
-				if (
-					decision === "original" &&
-					typeof pending.req.input.originalPath === "string" &&
-					pending.req.input.originalPath.trim()
-				) {
-					pending.req.input.path = pending.req.input.originalPath;
-				}
-				pending.resolve(decision !== "no");
-				setPending(null);
-				setStatus("running");
+				applyTuiApprovalKey(input, key, pending, harness, setPending, setStatus);
 				return;
 			}
 			const open = pickerRef.current;
 			if (open) {
-				const nav = inkPickerNav(key);
-				if (nav === "esc") {
-					if (pickerEscTimer.current) clearTimeout(pickerEscTimer.current);
-					pickerEscTimer.current = setTimeout(() => {
-						pickerEscTimer.current = null;
-						const still = pickerRef.current;
-						if (!still) return;
-						applyPickerKeys(
-							still,
-							{
-								escape: true,
-								upArrow: false,
-								downArrow: false,
-								tab: false,
-								shift: false,
-								return: false,
-							},
-							setPicker,
-							setStatus,
-							setValue,
-							confirmPicker,
-						);
-					}, 40);
-					return;
-				}
-				if (pickerEscTimer.current) {
-					clearTimeout(pickerEscTimer.current);
-					pickerEscTimer.current = null;
-				}
-				applyPickerKeys(open, key, setPicker, setStatus, setValue, confirmPicker);
-				return;
+				handleOpenPickerInput(open, key, {
+					pickerEscTimer,
+					pickerRef,
+					setPicker,
+					setStatus,
+					setValue,
+					confirmPicker,
+				});
 			}
-			trySlashMenuInput(key, slashOpen, slashItems, slashIndex, setSlashIndex, setValue);
 		},
-		{ isActive: true },
+		{ isActive: (status === "approval" && Boolean(pending)) || Boolean(picker) },
 	);
 
 	const handleSlash = useCallback(
@@ -824,6 +886,7 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 				return;
 			}
 			setLines((prev) => [...prev, { key: `u-${prev.length}`, type: "user", text: trimmed }]);
+			setTurnTools([]);
 			setStatus("running");
 			const controller = new AbortController();
 			abortRef.current = controller;
@@ -833,6 +896,26 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 					(event) => {
 						if (event.kind === "session_meta") setTitle(event.title);
 						if (event.kind === "usage") setSpend(harness.spend);
+						if (event.kind === "completion") {
+							setTurnTools((tools) => {
+								const summary = summarizeTurnTools(tools);
+								setLines((prev) => {
+									const next = applyEvent(prev, event);
+									if (!summary) return next;
+									return [
+										...next,
+										{
+											key: `toolsum-${next.length}`,
+											type: "system" as const,
+											text: summary,
+										},
+									];
+								});
+								return [];
+							});
+							return;
+						}
+						setTurnTools((prev) => applyTurnToolEvent(prev, event));
 						setLines((prev) => applyEvent(prev, event));
 					},
 					{
@@ -853,21 +936,44 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 		[handleSlash, harness, slashIndex, slashItems, slashOpen, status],
 	);
 
-	const statusLabel = useMemo(() => {
-		if (status === "running") return "running";
-		if (status === "approval") return "awaiting approval";
-		if (status === "picker") return "";
-		return "";
-	}, [status]);
+	const composerHint = useMemo(() => {
+		if (status === "running") return "Agent is working… (you can still type your next message)";
+		if (status === "approval") return "Answer the approval prompt above (y / n / a)";
+		return mediaLine;
+	}, [mediaLine, status]);
+
+	const slashUp = useCallback(
+		() => setSlashIndex((index) => stepIndex(index, slashItems.length, -1)),
+		[slashItems.length],
+	);
+	const slashDown = useCallback(
+		() => setSlashIndex((index) => stepIndex(index, slashItems.length, 1)),
+		[slashItems.length],
+	);
+	const slashTab = useCallback(() => {
+		const selected = slashItems[slashIndex] ?? slashItems[0];
+		if (selected) setValue(completeSlashCommand(selected));
+	}, [slashIndex, slashItems]);
 
 	const rail = sidebarWidth(columns);
+	const warmupSeed = useMemo(() => lines.filter((line) => line.type === "user").length, [lines]);
+	const assistantStarted = lines.at(-1)?.type === "assistant";
+	const progressLabel = turnProgressLabel({
+		tools: turnTools,
+		assistantStarted,
+		tick: progressTick,
+		warmupSeed,
+	});
+	const showProgress = status === "running";
 	const chrome = tuiChromeRows({
 		approval: Boolean(pending),
 		pickerCount: picker?.items.length ?? 0,
 		slashCount: slashOpen ? slashItems.length : 0,
+		activity: showProgress,
 	});
-	const shown = takeVisibleLines(lines, visibleTranscriptCount(rows, chrome));
+	const transcriptHeight = visibleTranscriptRows(rows, chrome);
 	const mainWidth = rail ? Math.max(40, columns - rail) : columns;
+	const shown = takeLinesForRowBudget(lines, mainWidth, transcriptHeight);
 
 	const main = (
 		<Box flexDirection="column" width={mainWidth} height={rows}>
@@ -890,22 +996,26 @@ function App(props: Readonly<{ harness: HarnessRuntime }>): React.ReactElement {
 					/>
 				</Box>
 			) : (
-				<Box flexDirection="column" flexGrow={1} overflow="hidden">
-					<StreamView theme={theme} lines={shown} />
-				</Box>
+				<StreamView theme={theme} lines={shown} width={mainWidth} height={transcriptHeight} />
 			)}
 			{pending ? <ApprovalCard theme={theme} req={pending.req} /> : null}
+			{showProgress ? (
+				<TurnProgressBar theme={theme} label={progressLabel} width={mainWidth} />
+			) : null}
 			<ComposerFooter
 				theme={theme}
 				status={status}
-				statusLabel={statusLabel}
 				value={value}
+				width={mainWidth}
 				onChange={setValue}
 				onSubmit={submit}
 				slashOpen={slashOpen}
 				slashItems={slashItems}
 				slashIndex={slashIndex}
-				mediaLine={mediaLine}
+				onSlashUp={slashUp}
+				onSlashDown={slashDown}
+				onSlashTab={slashTab}
+				hintLine={composerHint}
 				pickerOpen={Boolean(picker)}
 			/>
 		</Box>
