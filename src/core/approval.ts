@@ -1,3 +1,4 @@
+import { jevClassifyToolApproval } from "../decisions/jev-approval.ts";
 import type { AgentEventEmitter } from "./events.ts";
 
 export type ExecApprovalPolicy = "prompt" | "deny" | "auto";
@@ -48,6 +49,31 @@ export function isLikelyDestructive(command: string): boolean {
 	return DESTRUCTIVE_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
 }
 
+/** Shell commands that remove files or directories (berry auto-approve still prompts). */
+export function commandLooksLikeDeletion(command: string): boolean {
+	const c = command.trim();
+	if (!c) return false;
+	return (
+		/\brm\b/.test(c) ||
+		/\bunlink\b/.test(c) ||
+		/\brmdir\b/.test(c) ||
+		/\bshred\b/.test(c) ||
+		/\bgit\s+clean\b/.test(c) ||
+		/\bfind\b[^\n]*\s-delete\b/.test(c) ||
+		/\bxargs\s+rm\b/.test(c)
+	);
+}
+
+/** When berry auto-approve is on: allow everything else; prompt only for risky deletes/damage. */
+export function needsDestructiveApproval(req: ApprovalRequest): boolean {
+	if (req.toolName === "exec") {
+		const command = commandOf(req);
+		return isLikelyDestructive(command) || commandLooksLikeDeletion(command);
+	}
+	if (req.toolName === "git_commit") return false;
+	return isRiskyToolCall(req.toolName);
+}
+
 export function parseExecApprovalPolicy(raw: string | undefined): ExecApprovalPolicy {
 	const v = raw?.trim().toLowerCase();
 	return v === "deny" || v === "auto" || v === "prompt" ? v : "prompt";
@@ -55,6 +81,15 @@ export function parseExecApprovalPolicy(raw: string | undefined): ExecApprovalPo
 
 function commandOf(req: ApprovalRequest): string {
 	return typeof req.input.command === "string" ? req.input.command : "";
+}
+
+export interface JevApprovalGateDeps {
+	apiKey: string;
+	baseUrl?: string;
+	model?: string;
+	minConfidence?: number;
+	/** Latest user message for the active turn. */
+	userMessage?: string;
 }
 
 export interface ExecApprovalGateDeps {
@@ -67,6 +102,26 @@ export interface ExecApprovalGateDeps {
 	resolveUploadEdit?: (
 		path: string,
 	) => { rel: string; sourcePath: string; name: string } | undefined;
+	/** Jev noul check before showing a permission prompt. */
+	jev?: JevApprovalGateDeps;
+	/** Berry: auto-allow reads, writes, and benign exec; prompt only for deletes and dangerous commands. */
+	autoApproveExceptDestructive?: boolean;
+}
+
+async function jevOrPromptAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Promise<boolean> {
+	if (deps.jev?.apiKey) {
+		const verdict = await jevClassifyToolApproval({
+			req,
+			userMessage: deps.jev.userMessage,
+			apiKey: deps.jev.apiKey,
+			baseUrl: deps.jev.baseUrl,
+			model: deps.jev.model,
+			minConfidence: deps.jev.minConfidence,
+		});
+		if (verdict === "allow") return true;
+		if (verdict === "deny") return false;
+	}
+	return promptAsk(deps, req);
 }
 
 async function promptAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Promise<boolean> {
@@ -84,6 +139,13 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 	const always = deps.alwaysAllow ?? new Set<string>();
 	return {
 		async request(req) {
+			if (deps.autoApproveExceptDestructive) {
+				if (isFileWriteTool(req.toolName)) return true;
+				if (!isRiskyToolCall(req.toolName)) return true;
+				if (always.has(req.toolName)) return true;
+				if (!needsDestructiveApproval(req)) return true;
+				return promptAsk(deps, req);
+			}
 			if (isFileWriteTool(req.toolName) && deps.resolveUploadEdit) {
 				const path = typeof req.input.path === "string" ? req.input.path : "";
 				const hit = deps.resolveUploadEdit(path);
@@ -91,14 +153,14 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 					req.input.copyPath = hit.rel;
 					req.input.originalPath = hit.sourcePath;
 					req.input.fileName = hit.name;
-					return promptAsk(deps, req);
+					return jevOrPromptAsk(deps, req);
 				}
 			}
 			if (isFileWriteTool(req.toolName)) {
 				if (always.has("write_file") || always.has("edit_file") || always.has(req.toolName)) {
 					return true;
 				}
-				if (deps.policy === "prompt" && deps.ask) return promptAsk(deps, req);
+				if (deps.policy === "prompt" && deps.ask) return jevOrPromptAsk(deps, req);
 				return true;
 			}
 			if (!isRiskyToolCall(req.toolName)) return true;
@@ -108,7 +170,7 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 			if (deps.policy === "auto") {
 				return !isLikelyDestructive(command);
 			}
-			return promptAsk(deps, req);
+			return jevOrPromptAsk(deps, req);
 		},
 	};
 }

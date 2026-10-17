@@ -18,6 +18,14 @@ export type AgentEvent =
 	| { kind: "approval_request"; callId: string; toolName: string; input: Record<string, unknown> }
 	| { kind: "session_meta"; sessionId: string; title: string }
 	| {
+			kind: "turn_meta";
+			routing: "jev_shortcut" | "chat";
+			modelId?: string;
+			resolvedModelId?: string;
+			jevModel?: string;
+			toolName?: string;
+	  }
+	| {
 			kind: "usage";
 			promptTokens: number;
 			completionTokens: number;

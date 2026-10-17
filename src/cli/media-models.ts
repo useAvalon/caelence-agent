@@ -45,9 +45,45 @@ export const TRANSCRIBE_MODELS: readonly MediaModelOption[] = [
 	{ id: "fish-audio/transcribe-1", label: "Fish Transcribe" },
 ];
 
+export const SPEECH_MODELS: readonly MediaModelOption[] = [
+	{ id: "mistralai/voxtral-mini-tts-2603", label: "Voxtral Mini TTS", hint: "default" },
+	{ id: "microsoft/mai-voice-2.1-flash", label: "MAI Voice 2.1 Flash", hint: "fast" },
+	{ id: "google/gemini-3.8-flash-lite-tts", label: "Gemini Flash Lite TTS" },
+	{ id: "elevenlabs/eleven-v4-turbo", label: "Eleven v4 Turbo", hint: "expressive" },
+	{ id: "hexgrad/kokoro-82m", label: "Kokoro 82M", hint: "lightweight" },
+];
+
+/** OpenRouter no longer lists legacy OpenAI TTS slugs; remap saved prefs. */
+export const DEPRECATED_SPEECH_MODEL_IDS = new Set([
+	"openai/gpt-4o-mini-tts",
+	"openai/gpt-4o-mini-tts-2025-12-15",
+	"openai/tts-1",
+	"openai/tts-1-hd",
+]);
+
 export const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux.2-pro";
 export const DEFAULT_VIDEO_MODEL = "google/veo-3.1-lite";
 export const DEFAULT_TRANSCRIBE_MODEL = "openai/whisper-1";
+export const DEFAULT_SPEECH_MODEL = "mistralai/voxtral-mini-tts-2603";
+/** Lower-latency default when the native berry widget synthesizes speech. */
+export const BERRY_SPEECH_MODEL = "microsoft/mai-voice-2.1-flash";
+
+export function normalizeSpeechModelId(id: string): string {
+	const trimmed = id.trim();
+	if (!trimmed || DEPRECATED_SPEECH_MODEL_IDS.has(trimmed)) return DEFAULT_SPEECH_MODEL;
+	return trimmed;
+}
+
+/** Provider-specific default voice for `POST /audio/speech`. */
+export function defaultSpeechVoice(modelId: string): string {
+	const id = modelId.toLowerCase();
+	if (id.includes("voxtral")) return "en_paul_neutral";
+	if (id.includes("elevenlabs")) return "george";
+	if (id.includes("mai-voice")) return "en-US-AvaNeural";
+	if (id.includes("gemini") && id.includes("tts")) return "Kore";
+	if (id.includes("kokoro")) return "af_bella";
+	return "en_paul_neutral";
+}
 
 export function mediaPickerItems(
 	list: readonly MediaModelOption[],
@@ -73,10 +109,12 @@ export function formatMediaComposerLine(prefs: {
 	imageModel: string;
 	videoModel: string;
 	transcribeModel: string;
+	speechModel: string;
 }): string {
 	return [
 		`Image ${mediaModelLabel(IMAGE_MODELS, prefs.imageModel)}`,
 		`Clip ${mediaModelLabel(VIDEO_MODELS, prefs.videoModel)}`,
-		`Speech ${mediaModelLabel(TRANSCRIBE_MODELS, prefs.transcribeModel)}`,
+		`Listen ${mediaModelLabel(TRANSCRIBE_MODELS, prefs.transcribeModel)}`,
+		`Speak ${mediaModelLabel(SPEECH_MODELS, prefs.speechModel)}`,
 	].join(" · ");
 }

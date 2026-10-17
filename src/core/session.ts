@@ -74,6 +74,13 @@ export function latestCompactionCover(session: Session): number {
 	return covered;
 }
 
+/** Tool rows belong on the transcript, not in the next model prompt. */
+export function isModelContextMessage(message: SessionMessage): boolean {
+	return (
+		message.kind === "turn" || message.kind === "system" || message.kind === "compaction_checkpoint"
+	);
+}
+
 /** Tokens the next turn would send: summaries plus uncovered turns. */
 export function liveContextTokens(session: Session): number {
 	const coveredThrough = latestCompactionCover(session);
@@ -81,6 +88,7 @@ export function liveContextTokens(session: Session): number {
 	for (const summary of compactionSummaries(session)) chars += summary.length;
 	session.messages.forEach((message, seq) => {
 		if (seq <= coveredThrough) return;
+		if (!isModelContextMessage(message) || message.kind === "compaction_checkpoint") return;
 		chars += JSON.stringify(message).length;
 	});
 	return Math.floor(chars / CHARS_PER_TOKEN);

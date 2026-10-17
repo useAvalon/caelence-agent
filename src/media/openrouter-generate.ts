@@ -1,3 +1,4 @@
+import { defaultSpeechVoice } from "../cli/media-models.ts";
 import { OPENROUTER_DEFAULT_BASE_URL } from "../config.ts";
 import { PRODUCT_NAME } from "../product.ts";
 
@@ -175,4 +176,40 @@ export async function transcribeAudio(input: {
 	const text = json.text?.trim() ?? "";
 	if (!text) throw new Error("Transcription returned no text.");
 	return text;
+}
+
+export interface SynthesizedSpeech {
+	mimeType: string;
+	data: string;
+}
+
+export async function synthesizeSpeech(input: {
+	text: string;
+	model: string;
+	voice?: string;
+	apiKey: string;
+	baseUrl?: string;
+	fetchImpl?: FetchImpl;
+}): Promise<SynthesizedSpeech> {
+	const text = input.text.trim();
+	if (!text) throw new Error("Nothing to speak.");
+	if (!input.apiKey.trim()) throw new Error("OpenRouter API key is missing. Add it in Settings.");
+	const base = (input.baseUrl ?? OPENROUTER_DEFAULT_BASE_URL).replace(/\/+$/, "");
+	const fetchImpl = input.fetchImpl ?? globalThis.fetch;
+	const res = await fetchImpl(`${base}/audio/speech`, {
+		method: "POST",
+		headers: authHeaders(input.apiKey),
+		body: JSON.stringify({
+			model: input.model,
+			input: text.slice(0, 4096),
+			voice: input.voice ?? defaultSpeechVoice(input.model),
+			response_format: "mp3",
+		}),
+	});
+	if (!res.ok) throw new Error(`Speech synthesis failed (${res.status})${await readError(res)}`);
+	const mime =
+		(res.headers.get("content-type") || "audio/mpeg").split(";")[0]?.trim() || "audio/mpeg";
+	const buf = Buffer.from(await res.arrayBuffer());
+	if (buf.byteLength === 0) throw new Error("Speech synthesis returned no audio.");
+	return { mimeType: mime, data: buf.toString("base64") };
 }

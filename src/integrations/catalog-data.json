@@ -420,5 +420,14 @@
 		"docsUrl": "https://developer.monday.com/api-reference/docs/mcp",
 		"glyph": "Mo",
 		"scopes": []
+	},
+	{
+		"id": "tradingview",
+		"label": "TradingView",
+		"description": "Charts, watchlists, and market data through the hosted MCP.",
+		"mcpUrl": "https://mcp.tradingview.com/mcp",
+		"docsUrl": "https://www.tradingview.com/support/",
+		"glyph": "Tv",
+		"scopes": []
 	}
 ]

@@ -26,7 +26,7 @@ Do not commit `.env`, `.harness/`, OpenRouter keys, or OAuth client secrets. Des
 | `skills/` | Bundled catalog shipped with the package |
 | `bin/harness.ts` | CLI entry (`caelence` and `caelence-agent` on npm) |
 
-`createHarness` in `src/runtime.ts` is the shared turn loop. Tests sit next to the code they cover (`*.test.ts`). Biome is the formatter and linter; it runs on staged files at commit.
+`createHarness` in `src/runtime.ts` is the shared turn loop. With an OpenRouter key, **Jev** (`typesafe/jev-1.13`, [docs](https://openrouter.ai/docs/guides/community/jev)) is on by default: screen-action shortcuts before a chat turn when matching tools exist (`open_url`, `open_search`, `open_app`), and a noul check before exec/file approval prompts. Disable with `decisions.enabled: false` in `harness.config.ts` or `HARNESS_JEV=0`. Tests sit next to the code they cover (`*.test.ts`). Biome is the formatter and linter; it runs on staged files at commit.
 
 ## Skills and copy
 

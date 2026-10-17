@@ -5,6 +5,7 @@
 import type { JSONSchema, Model, StreamOptions, ToolSpec } from "@strands-agents/sdk";
 import { Agent, Message, type ModelStreamUpdateEvent, TextBlock, tool } from "@strands-agents/sdk";
 import { OpenAIModel } from "@strands-agents/sdk/models/openai";
+import { type ModelRole, titleForRole } from "../cli/defaults.ts";
 import { PRODUCT_NAME } from "../product.ts";
 import { withAutoRouterFetch } from "./auto-router.ts";
 import { errorMessage } from "./errors.ts";
@@ -147,11 +148,19 @@ function wrapModelAsProvider(
 	};
 }
 
+export function openRouterHeaders(role?: ModelRole): Record<string, string> {
+	return {
+		"HTTP-Referer": "https://caelence.com",
+		"X-Title": role ? titleForRole(role) : PRODUCT_NAME,
+	};
+}
+
 export function constructOpenRouterProvider(options: {
 	apiKey: string;
 	model: string;
 	baseUrl: string;
 	maxTokens?: number;
+	role?: ModelRole;
 	sessionId?: () => string | undefined;
 }): MainModelProvider {
 	if (!options.apiKey.trim()) {
@@ -176,10 +185,7 @@ export function constructOpenRouterProvider(options: {
 		},
 		clientConfig: {
 			baseURL: options.baseUrl.replace(/\/+$/, ""),
-			defaultHeaders: {
-				"HTTP-Referer": "https://caelence.com",
-				"X-Title": PRODUCT_NAME,
-			},
+			defaultHeaders: openRouterHeaders(options.role),
 			fetch: createUsageTrackingFetch(
 				(usage) => {
 					lastUsage = usage;

@@ -130,7 +130,7 @@ async function connectRemote(
 	};
 	const { verifier, challenge } = await pkcePair();
 	const state = randomBytes(16).toString("hex");
-	const useResource = auth === "dcr";
+	const useResource = auth !== "google" && auth !== "microsoft";
 	const authorizeUrl = buildAuthorizeUrl({
 		spec,
 		clientId: discovered.client.clientId,

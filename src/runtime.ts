@@ -1,4 +1,6 @@
 import { resolve } from "node:path";
+import type { ModelRole } from "./cli/defaults.ts";
+import { cachedLiveTargetNames } from "./cli/openrouter-live.ts";
 import { resolveTheme, type Theme } from "./cli/theme.ts";
 import { type HarnessConfig, loadConfig, resolveOpenRouter } from "./config.ts";
 import {
@@ -37,8 +39,10 @@ import {
 	createConstructAgent,
 } from "./core/strands.ts";
 import { addUsage, type TokenUsage } from "./core/usage.ts";
+import { resolveHarnessDecisions } from "./decisions/config.ts";
 import { listUploadOriginals, matchUploadEdit } from "./desktop/uploads.ts";
 import { type ChatFn, createOpenRouterChat } from "./evals/runner.ts";
+import { syncCatalog } from "./integrations/catalog-sync.ts";
 import { buildRemoteMcpTools } from "./integrations/remote-mcp.ts";
 import { linkedMcpSources } from "./integrations/store.ts";
 import { listUserMcpServers, userMcpToolPrefix } from "./mcp/user-servers.ts";
@@ -101,6 +105,9 @@ export interface HarnessRuntime {
 			signal?: AbortSignal;
 			approvalAsk?: (req: ApprovalRequest) => Promise<boolean>;
 			editUserTurn?: number;
+			berryConversational?: boolean;
+			/** Berry widget: auto-allow tools except deletes and dangerous exec. */
+			berryAutoApprove?: boolean;
 		},
 	): Promise<Session | undefined>;
 	setModel(modelId: string): void;
@@ -138,6 +145,8 @@ export interface CreateHarnessOptions {
 	mode?: AgentMode;
 	/** Load one-click MCP connections from ~/.harness. Default on unless a test provider is passed. */
 	loadIntegrations?: boolean;
+	/** Appended to the composed system prompt (berry voice persona, etc.). */
+	extraSystemAppend?: string;
 }
 
 const SUBAGENT_INSTRUCTIONS = [
@@ -146,6 +155,7 @@ const SUBAGENT_INSTRUCTIONS = [
 ].join(" ");
 
 export async function createHarness(options: CreateHarnessOptions): Promise<HarnessRuntime> {
+	if (!process.env.BUN_TEST) void syncCatalog().catch(() => undefined);
 	const cwd = options.cwd;
 	const config = options.config ?? (await loadConfig(cwd));
 	const theme = resolveTheme(config.theme);
@@ -166,8 +176,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	let skills = loadActiveSkills();
 	const layers = loadInstructionLayers({ cwd, projectFile: config.instructionsFile });
 	let mode = parseAgentMode(options.mode ?? config.mode);
-	const composePrompt = (nextMode: AgentMode) =>
-		buildSystemPrompt({
+	const systemSuffix = options.extraSystemAppend?.trim();
+	const composePrompt = (nextMode: AgentMode) => {
+		let prompt = buildSystemPrompt({
 			name: config.name,
 			cwd,
 			userInstructions: layers.user,
@@ -175,6 +186,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			skillCatalog: skillCatalogPrompt(skills),
 			mode: nextMode,
 		});
+		if (systemSuffix) prompt += `\n\n${systemSuffix}`;
+		return prompt;
+	};
 	let systemPrompt = composePrompt(mode);
 	const store = createFileSessionStore(cwd);
 	const local = createLocalTools({
@@ -255,11 +269,12 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			: await createObservability({ enabled: config.observability?.enabled }));
 	if (!options.observability) void syncPrompts({ prompts: harnessPromptRecords() });
 	const agentVersion = resolveAgentVersion();
-	const makeProvider = (id: string): MainModelProvider =>
+	const makeProvider = (id: string, role?: ModelRole): MainModelProvider =>
 		options.provider ??
 		constructOpenRouterProvider({
 			apiKey,
 			model: id,
+			role,
 			baseUrl: or.baseUrl,
 			sessionId: () => activeSessionId,
 		});
@@ -451,11 +466,22 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				return undefined;
 			}
 			const policy = options.approvalPolicy ?? config.tools.exec.approval;
+			const jev = resolveHarnessDecisions(config, apiKey, or.baseUrl);
 			const approval: ApprovalGate = createExecApprovalGate({
 				policy,
 				alwaysAllow,
 				emit,
+				autoApproveExceptDestructive: turnOptions?.berryAutoApprove === true,
 				resolveUploadEdit: (path) => matchUploadEdit(cwd, path),
+				jev: jev?.approvals
+					? {
+							apiKey: jev.apiKey,
+							baseUrl: jev.baseUrl,
+							model: jev.model,
+							minConfidence: jev.minConfidence,
+							userMessage: message,
+						}
+					: undefined,
 				ask: async (req) => {
 					if (turnOptions?.approvalAsk) return turnOptions.approvalAsk(req);
 					if (policy === "prompt") return false;
@@ -480,7 +506,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 								store: createMemorySessionStore(),
 								provider,
 								constructAgent,
-								resolveProvider: options.provider ? undefined : (id) => makeProvider(id),
+								resolveProvider: options.provider
+									? undefined
+									: (id, role) => makeProvider(id, role),
 								observability,
 								traceName: "subagent",
 								requestType: "chat",
@@ -505,7 +533,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				store,
 				provider,
 				constructAgent,
-				resolveProvider: options.provider ? undefined : (id) => makeProvider(id),
+				resolveProvider: options.provider ? undefined : (id, role) => makeProvider(id, role),
 				summarize: defaultSummarizer(provider),
 				observability,
 				traceName: "agent_turn",
@@ -513,8 +541,13 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				agentVersion,
 				hooks,
 				mode,
+				jev,
 			};
 			const capture: AgentEventEmitter = (event) => {
+				if (event.kind === "turn_meta" && event.routing === "chat" && event.modelId) {
+					const resolved = cachedLiveTargetNames().get(event.modelId);
+					if (resolved) event = { ...event, resolvedModelId: resolved };
+				}
 				if (event.kind === "usage") {
 					runtime.spend = addUsage(runtime.spend, {
 						promptTokens: event.promptTokens,
@@ -533,6 +566,12 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 					model: modelId,
 					...(turnOptions?.editUserTurn !== undefined
 						? { editUserTurn: turnOptions.editUserTurn }
+						: {}),
+					...(turnOptions?.berryConversational !== undefined
+						? { berryConversational: turnOptions.berryConversational }
+						: {}),
+					...(turnOptions?.berryAutoApprove !== undefined
+						? { berryAutoApprove: turnOptions.berryAutoApprove }
 						: {}),
 				},
 				capture,

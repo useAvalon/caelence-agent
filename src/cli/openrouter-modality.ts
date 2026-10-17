@@ -2,11 +2,12 @@ import { OPENROUTER_DEFAULT_BASE_URL } from "../config.ts";
 import {
 	IMAGE_MODELS,
 	type MediaModelOption,
+	SPEECH_MODELS,
 	TRANSCRIBE_MODELS,
 	VIDEO_MODELS,
 } from "./media-models.ts";
 
-export type MediaModality = "image" | "video" | "transcription";
+export type MediaModality = "image" | "video" | "transcription" | "speech";
 
 const LIVE_TTL_MS = 10 * 60 * 1000;
 const caches = new Map<MediaModality, { expires: number; items: MediaModelOption[] }>();
@@ -21,6 +22,7 @@ function displayName(id: string, rawName: string): string {
 export function fallbackModels(modality: MediaModality): readonly MediaModelOption[] {
 	if (modality === "image") return IMAGE_MODELS;
 	if (modality === "video") return VIDEO_MODELS;
+	if (modality === "speech") return SPEECH_MODELS;
 	return TRANSCRIBE_MODELS;
 }
 

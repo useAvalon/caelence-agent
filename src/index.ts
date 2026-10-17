@@ -5,7 +5,11 @@ export {
 	type Theme,
 	type ThemeName,
 } from "./cli/theme.ts";
-export type { ExtraMcpServerConfig, HarnessConfig } from "./config.ts";
+export type {
+	ExtraMcpServerConfig,
+	HarnessConfig,
+	HarnessDecisionsConfig,
+} from "./config.ts";
 export {
 	DEFAULT_CONFIG,
 	DEFAULT_MODEL,
@@ -21,6 +25,7 @@ export {
 	isLikelyDestructive,
 	isRiskyToolCall,
 	isUploadEditRequest,
+	type JevApprovalGateDeps,
 	parseExecApprovalPolicy,
 } from "./core/approval.ts";
 export type { AgentEvent, AgentEventEmitter, MainModelProvider } from "./core/events.ts";
@@ -67,6 +72,26 @@ export {
 	titleFromUserMessage,
 } from "./core/session.ts";
 export { addUsage, formatUsage, parseTokenUsage, type TokenUsage } from "./core/usage.ts";
+export {
+	type ResolvedHarnessDecisions,
+	resolveHarnessDecisions,
+} from "./decisions/config.ts";
+export {
+	classifyAgentRoute,
+	JEV_MODEL,
+	type JevRoute,
+	type JevRoutePlan,
+	submitJevDecisions,
+} from "./decisions/jev.ts";
+export {
+	type JevApprovalVerdict,
+	jevClassifyToolApproval,
+} from "./decisions/jev-approval.ts";
+export {
+	extractScreenShortcutInput,
+	planScreenShortcut,
+	type ScreenShortcutPlan,
+} from "./decisions/screen-shortcut.ts";
 export {
 	type ChatFn,
 	createOpenRouterChat,
