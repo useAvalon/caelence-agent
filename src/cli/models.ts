@@ -1,4 +1,3 @@
-import { DEFAULT_MODELS } from "./defaults.ts";
 import { prettyLiveModelName } from "./openrouter-live.ts";
 
 export interface ModelOption {
@@ -28,9 +27,6 @@ export const HARNESS_MODELS: readonly ModelOption[] = [
 	{ id: "qwen/qwen3-coder-next", label: "Qwen3 Coder" },
 	{ id: "z-ai/glm-5.2", label: "GLM 5.2" },
 ];
-
-/** Default chat model for the berry widget. The desktop app and terminal stay on Auto. */
-export const BERRY_CHAT_MODEL = DEFAULT_MODELS.writer;
 
 export function modelPickerItems(
 	current?: string,

@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type McpAuthKind = "dcr" | "google" | "microsoft" | "desktop" | "oauth_preregistered";
+export type McpAuthKind = "dcr" | "google" | "microsoft" | "desktop";
 
 export interface McpCatalogEntry {
 	id: string;
@@ -22,20 +22,13 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = JSON.parse(
 	readFileSync(join(import.meta.dir, "catalog-data.json"), "utf8"),
 ) as McpCatalogEntry[];
 
-let liveCatalog: McpCatalogEntry[] | undefined;
-
-export function setLiveCatalog(entries: McpCatalogEntry[] | undefined): void {
-	liveCatalog = entries;
-}
-
 export function findMcpCatalog(id: string): McpCatalogEntry | undefined {
-	return (liveCatalog ?? MCP_CATALOG).find((item) => item.id === id);
+	return MCP_CATALOG.find((item) => item.id === id);
 }
 
 /** One-click DCR first, then desktop MCP, then user-owned OAuth clients. */
 export function listedMcpCatalog(): McpCatalogEntry[] {
-	const rows = liveCatalog ?? [...MCP_CATALOG];
-	return [...rows].sort((a, b) => listRank(a) - listRank(b));
+	return [...MCP_CATALOG].sort((a, b) => listRank(a) - listRank(b));
 }
 
 export function needsDesktopMcp(item: { auth?: McpAuthKind }): boolean {
@@ -79,11 +72,7 @@ function markDataUrl(file: string, mime: string): string {
 
 export function integrationLogoUrl(id: string): string {
 	const local = localMark(id);
-	if (!local) {
-		const letter = id.slice(0, 2).toUpperCase();
-		const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#6e93b8"/><text x="16" y="21" text-anchor="middle" font-size="12" fill="#fff" font-family="sans-serif">${letter}</text></svg>`;
-		return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-	}
+	if (!local) throw new Error(`Missing integration mark for ${id}.`);
 	return markDataUrl(local.file, local.mime);
 }
 

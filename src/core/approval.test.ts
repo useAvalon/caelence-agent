@@ -1,12 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-	commandLooksLikeDeletion,
 	createExecApprovalGate,
 	isLikelyDestructive,
 	isUploadEditRequest,
-	needsDestructiveApproval,
 	parseExecApprovalPolicy,
-} from "./approval.ts";
+} from "../core/approval.ts";
 
 describe("exec approval", () => {
 	test("flags destructive commands", () => {
@@ -47,48 +45,6 @@ describe("exec approval", () => {
 			await gate.request({ callId: "2", toolName: "git_commit", input: { message: "x" } }),
 		).toBe(true);
 		expect(await gate.request({ callId: "3", toolName: "exec", input: { command: "ls" } })).toBe(
-			false,
-		);
-	});
-
-	test("berry auto approve skips prompts except deletes", async () => {
-		const asked: string[] = [];
-		const gate = createExecApprovalGate({
-			policy: "prompt",
-			autoApproveExceptDestructive: true,
-			ask: async (req) => {
-				asked.push(req.toolName);
-				return true;
-			},
-		});
-		expect(
-			await gate.request({ callId: "1", toolName: "read_file", input: { path: "a.ts" } }),
-		).toBe(true);
-		expect(
-			await gate.request({
-				callId: "2",
-				toolName: "exec",
-				input: { command: "find . -name foo.md" },
-			}),
-		).toBe(true);
-		expect(
-			await gate.request({
-				callId: "3",
-				toolName: "write_file",
-				input: { path: "a.ts", content: "x" },
-			}),
-		).toBe(true);
-		expect(asked).toEqual([]);
-		expect(
-			await gate.request({
-				callId: "4",
-				toolName: "exec",
-				input: { command: "rm notes.txt" },
-			}),
-		).toBe(true);
-		expect(asked).toEqual(["exec"]);
-		expect(commandLooksLikeDeletion("rm foo")).toBe(true);
-		expect(needsDestructiveApproval({ callId: "x", toolName: "git_commit", input: {} })).toBe(
 			false,
 		);
 	});

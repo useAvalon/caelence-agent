@@ -2,10 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
 	DEFAULT_IMAGE_MODEL,
-	DEFAULT_SPEECH_MODEL,
 	DEFAULT_TRANSCRIBE_MODEL,
 	DEFAULT_VIDEO_MODEL,
-	normalizeSpeechModelId,
 } from "../cli/media-models.ts";
 import { harnessHome } from "../desktop/secrets.ts";
 
@@ -13,7 +11,6 @@ export interface MediaPrefs {
 	imageModel: string;
 	videoModel: string;
 	transcribeModel: string;
-	speechModel: string;
 }
 
 function prefsPath(env: Record<string, string | undefined> = process.env): string {
@@ -27,7 +24,6 @@ export function readMediaPrefs(env: Record<string, string | undefined> = process
 			imageModel: DEFAULT_IMAGE_MODEL,
 			videoModel: DEFAULT_VIDEO_MODEL,
 			transcribeModel: DEFAULT_TRANSCRIBE_MODEL,
-			speechModel: DEFAULT_SPEECH_MODEL,
 		};
 	}
 	try {
@@ -36,14 +32,12 @@ export function readMediaPrefs(env: Record<string, string | undefined> = process
 			imageModel: parsed.imageModel?.trim() || DEFAULT_IMAGE_MODEL,
 			videoModel: parsed.videoModel?.trim() || DEFAULT_VIDEO_MODEL,
 			transcribeModel: parsed.transcribeModel?.trim() || DEFAULT_TRANSCRIBE_MODEL,
-			speechModel: normalizeSpeechModelId(parsed.speechModel ?? DEFAULT_SPEECH_MODEL),
 		};
 	} catch {
 		return {
 			imageModel: DEFAULT_IMAGE_MODEL,
 			videoModel: DEFAULT_VIDEO_MODEL,
 			transcribeModel: DEFAULT_TRANSCRIBE_MODEL,
-			speechModel: DEFAULT_SPEECH_MODEL,
 		};
 	}
 }

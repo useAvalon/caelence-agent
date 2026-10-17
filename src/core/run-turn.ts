@@ -1,29 +1,3 @@
-import type { ModelRole } from "../cli/defaults.ts";
-import { modelFor } from "../cli/defaults.ts";
-import {
-	lastComputerComposeTask,
-	runComputerTask,
-	shouldUseComputerAgent,
-} from "../computer/run.ts";
-import type { ResolvedHarnessDecisions } from "../decisions/config.ts";
-import { tryJevShortcutTurn } from "../decisions/jev-shortcut-turn.ts";
-import {
-	asksAboutCurrentScreen,
-	extractAppHint,
-	hostsMentioned,
-	stripBerryModeBanner,
-} from "../decisions/screen-shortcut.ts";
-import {
-	lockBerryBrowser,
-	resetBerryScreenBudget,
-	setBerryUrlAllowlist,
-} from "../desktop/berry-computer.ts";
-import {
-	BERRY_AGENT_SYSTEM_APPEND,
-	BERRY_CONVERSATION_SYSTEM_APPEND,
-} from "../desktop/berry-prompt.ts";
-import { filterBerryToolsForTurn } from "../desktop/berry-turn.ts";
-import { isPlaceholderUserMessage } from "../desktop/berry-voice-input.ts";
 import { noopObservability } from "../observability/noop.ts";
 import { sanitize } from "../observability/sanitize.ts";
 import type { Observability } from "../observability/types.ts";
@@ -45,6 +19,7 @@ import { modePrompt } from "./mode.ts";
 import {
 	compactionSummaries,
 	DEFAULT_CONTEXT_WINDOW_TOKENS,
+	isModelContextMessage,
 	replaceUserTurn,
 	type Session,
 	type SessionMessage,
@@ -62,9 +37,6 @@ export interface TurnRequest {
 	sessionId?: string;
 	model?: string;
 	editUserTurn?: number;
-	/** Berry widget: true = conversation + speak; false = autonomous agent with search/tools. */
-	berryConversational?: boolean;
-	berryAutoApprove?: boolean;
 }
 
 export interface RunTurnDeps {
@@ -77,7 +49,7 @@ export interface RunTurnDeps {
 	store: SessionStore;
 	provider: MainModelProvider;
 	constructAgent: ConstructAgent;
-	resolveProvider?: (modelId: string, role?: ModelRole) => MainModelProvider;
+	resolveProvider?: (modelId: string) => MainModelProvider;
 	summarize?: SummarizerFn;
 	contextWindowTokens?: number;
 	maxTokens?: number;
@@ -88,11 +60,7 @@ export interface RunTurnDeps {
 	userId?: string;
 	hooks?: HookRunner;
 	mode?: AgentMode;
-	/** OpenRouter Jev decisions (shortcuts + optional approval assist). */
-	jev?: ResolvedHarnessDecisions;
 }
-
-const BERRY_PLACEHOLDER_REPLY = "I didn't catch a question. Hold the berry and speak again.";
 
 export async function runTurn(
 	deps: RunTurnDeps,
@@ -100,41 +68,21 @@ export async function runTurn(
 	emit: AgentEventEmitter,
 	options: { signal?: AbortSignal } = {},
 ): Promise<Session | undefined> {
-	if (
-		process.env.HARNESS_BERRY === "1" &&
-		req.editUserTurn === undefined &&
-		isPlaceholderUserMessage(req.message)
-	) {
-		emit({ kind: "text_delta", text: BERRY_PLACEHOLDER_REPLY });
-		emit({ kind: "completion" });
-		if (req.sessionId) {
-			try {
-				return await deps.store.get(req.sessionId);
-			} catch {
-				return undefined;
-			}
-		}
-		return undefined;
-	}
-
 	let session: Session | undefined;
 	try {
 		if (req.sessionId) session = await deps.store.get(req.sessionId);
 		if (req.editUserTurn !== undefined) {
 			if (!session) throw new Error("No session to edit.");
-			session = await deps.store.save(
-				replaceUserTurn(session, req.editUserTurn, stripBerryModeBanner(req.message)),
-			);
+			session = await deps.store.save(replaceUserTurn(session, req.editUserTurn, req.message));
 		} else {
 			session ??= await deps.store.create(deps.systemPrompt, req.model);
-			const storedUser = stripBerryModeBanner(req.message);
 			session = await deps.store.append(session, {
 				kind: "turn",
 				role: "user",
-				content: storedUser,
+				content: req.message,
 			});
 			if (!session.title || session.title === "New chat") {
-				session = await deps.store.setTitle(session, titleFromUserMessage(storedUser));
+				session = await deps.store.setTitle(session, titleFromUserMessage(req.message));
 			}
 		}
 		emit({ kind: "session_meta", sessionId: session.id, title: session.title });
@@ -212,11 +160,6 @@ export async function runTurn(
 
 			let history: Array<{ role: "user" | "assistant"; content: string }> = [];
 			let systemPrompt = deps.systemPrompt;
-			if (req.berryConversational === true) {
-				systemPrompt += `\n\n${BERRY_CONVERSATION_SYSTEM_APPEND}`;
-			} else if (req.berryConversational === false) {
-				systemPrompt += `\n\n${BERRY_AGENT_SYSTEM_APPEND}`;
-			}
 			if (session) {
 				history = sessionToProviderMessages(session).slice(0, -1);
 				const summaries = compactionSummaries(session);
@@ -225,99 +168,7 @@ export async function runTurn(
 				}
 			}
 
-			let toolDefs = deps.mcp ? deps.mcp.listTools() : deps.tools;
-			if (req.berryConversational === true) {
-				toolDefs = filterBerryToolsForTurn(toolDefs, true);
-			} else if (req.berryConversational === false) {
-				toolDefs = filterBerryToolsForTurn(toolDefs, false);
-			}
-
-			if (req.berryConversational !== undefined || process.env.HARNESS_BERRY === "1") {
-				resetBerryScreenBudget();
-				setBerryUrlAllowlist(hostsMentioned(stripBerryModeBanner(req.message)));
-			}
-
-			const computerMessage = computerTaskMessage(req.message, history);
-			const useComputer =
-				Boolean(session) &&
-				(req.berryConversational !== undefined || process.env.HARNESS_BERRY === "1") &&
-				shouldUseComputerAgent(computerMessage, req.berryConversational);
-			const isBerry = req.berryConversational !== undefined || process.env.HARNESS_BERRY === "1";
-			if (isBerry && !useComputer) {
-				try {
-					const { nativeBridge } = await import("../computer/native/client.ts");
-					const { setScreenContext } = await import("../computer/prompt.ts");
-					const world = await nativeBridge.world();
-					if (world.text) {
-						setScreenContext(world.text);
-						systemPrompt = `${world.text.slice(0, 3_200)}\n\n${systemPrompt}`;
-					}
-				} catch {
-					// The berry bridge is absent in the terminal UI.
-				}
-			}
-			if (useComputer && session) {
-				const navigator =
-					deps.resolveProvider?.(modelFor("navigator"), "navigator") ?? deps.provider;
-				const writer = deps.resolveProvider?.(modelFor("writer"), "writer") ?? deps.provider;
-				const result = await runComputerTask({
-					message: computerMessage,
-					tier1: navigator,
-					tier2: writer,
-					signal: options.signal,
-					emit: capture,
-					autoApprove: req.berryAutoApprove === true,
-				});
-				if (!assistantText) capture({ kind: "text_delta", text: result.summary });
-				session = await deps.store.append(session, {
-					kind: "turn",
-					role: "assistant",
-					content: result.summary,
-				});
-				capture({ kind: "completion" });
-				root.update({
-					output: result.summary,
-					metadata: {
-						status: result.success ? "success" : "error",
-						generation_duration: Date.now() - startedAt,
-						decision: "computer",
-					},
-				});
-				await obs.flush();
-				return session;
-			}
-
-			const jevForTurn =
-				deps.jev && req.berryConversational !== undefined
-					? { ...deps.jev, shortcuts: true }
-					: deps.jev;
-
-			if (jevForTurn?.shortcuts && session) {
-				const shortcutSession = await tryJevShortcutTurn(
-					deps,
-					req,
-					session,
-					capture,
-					jevForTurn,
-					toolDefs,
-				);
-				if (typeof shortcutSession === "string") {
-					lockBerryBrowser();
-					systemPrompt += `\n\nThe site ${shortcutSession} is already open. Stay in that window and do what they asked. Do not tell them to finish it.`;
-				} else if (shortcutSession) {
-					root.update({
-						output: assistantText,
-						metadata: {
-							status: "success",
-							generation_duration: Date.now() - startedAt,
-							decision: "jev_shortcut",
-						},
-					});
-					await obs.flush();
-					return shortcutSession;
-				}
-			}
-
+			const toolDefs = deps.mcp ? deps.mcp.listTools() : deps.tools;
 			const tools: AgentTool[] = toolDefs.map((def) =>
 				guardTool(def, deps.approval, capture, obs, deps.hooks),
 			);
@@ -348,11 +199,6 @@ export async function runTurn(
 			}
 
 			try {
-				capture({
-					kind: "turn_meta",
-					routing: "chat",
-					modelId: provider.modelId,
-				});
 				await obs.generation(
 					"llm",
 					async (gen) => {
@@ -659,7 +505,7 @@ export function buildSystemPrompt(input: {
 export function defaultSummarizer(provider: MainModelProvider): SummarizerFn {
 	return async ({ messages }) => {
 		const text = messages
-			.filter((m) => m.kind === "turn" || m.kind === "system" || m.kind === "compaction_checkpoint")
+			.filter(isModelContextMessage)
 			.map((m) => {
 				if (m.kind === "turn") return `${m.role}: ${m.content}`;
 				if (m.kind === "system") return `system: ${m.text}`;
@@ -679,31 +525,4 @@ export function defaultSummarizer(provider: MainModelProvider): SummarizerFn {
 		}
 		return out.trim() || "Earlier turns were compacted.";
 	};
-}
-
-const SCREEN_FOLLOW_UP =
-	/\b(again|retry|continue|go on|go ahead|keep going|composer|type it|do it|post it|send it|in it|that field|text area|textarea)\b/i;
-
-/** Keep a short follow-up ("type it", "try again") on the computer path. */
-export function computerTaskMessage(
-	message: string,
-	history: ReadonlyArray<{ role: "user" | "assistant"; content: string }>,
-): string {
-	const current = stripBerryModeBanner(message);
-	if (extractAppHint(current) && !/^(open|launch)\b/i.test(current.trim())) {
-		const earlierApp = [...history]
-			.reverse()
-			.map((item) => (item.role === "user" ? stripBerryModeBanner(item.content) : ""))
-			.find((text) => shouldUseComputerAgent(text));
-		const priorApp = earlierApp || lastComputerComposeTask();
-		if (priorApp && priorApp !== current) return `${priorApp}\n${current}`;
-	}
-	if (shouldUseComputerAgent(current) && !SCREEN_FOLLOW_UP.test(current)) return current;
-	if (!SCREEN_FOLLOW_UP.test(current)) return current;
-	const earlier = [...history]
-		.reverse()
-		.map((item) => (item.role === "user" ? stripBerryModeBanner(item.content) : ""))
-		.find((text) => shouldUseComputerAgent(text));
-	const prior = earlier || lastComputerComposeTask();
-	return prior ? `${prior}\n${current}` : current;
 }

@@ -40,7 +40,6 @@ import type { StreamLine, ToolStatus, TurnToolLine } from "./tui-stream.ts";
 import { resolveTuiThemeEnv } from "./tui-terminal-probe.ts";
 import { TuiTextInput } from "./tui-text-input.tsx";
 import { summarizeTurnTools, takeLinesForRowBudget } from "./tui-transcript.ts";
-import { formatTurnMetaLine } from "./turn-meta-line.ts";
 
 type UiStatus = "idle" | "running" | "approval" | "picker";
 
@@ -81,7 +80,6 @@ function applyEvent(lines: StreamLine[], event: AgentEvent): StreamLine[] {
 		case "tool_call_end":
 			return lines;
 		case "session_meta":
-		case "turn_meta":
 			return lines;
 		case "error":
 			return [...lines, { key: `e-${lines.length}`, type: "error", text: event.message }];
@@ -674,7 +672,6 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 		resolve: (ok: boolean) => void;
 	} | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
-	const turnMetaRef = useRef<Extract<AgentEvent, { kind: "turn_meta" }> | null>(null);
 	const pickerRef = useRef(picker);
 	pickerRef.current = picker;
 	const pickerEscTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -887,7 +884,6 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 			}
 			setLines((prev) => [...prev, { key: `u-${prev.length}`, type: "user", text: trimmed }]);
 			setTurnTools([]);
-			turnMetaRef.current = null;
 			setStatus("running");
 			const controller = new AbortController();
 			abortRef.current = controller;
@@ -896,32 +892,21 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 					trimmed,
 					(event) => {
 						if (event.kind === "session_meta") setTitle(event.title);
-						if (event.kind === "turn_meta") turnMetaRef.current = event;
 						if (event.kind === "usage") setSpend(harness.spend);
 						if (event.kind === "completion") {
-							const metaLine = turnMetaRef.current
-								? formatTurnMetaLine(turnMetaRef.current)
-								: undefined;
 							setTurnTools((tools) => {
 								const summary = summarizeTurnTools(tools);
 								setLines((prev) => {
 									const next = applyEvent(prev, event);
-									const extra: StreamLine[] = [];
-									if (metaLine) {
-										extra.push({
-											key: `meta-${next.length}`,
-											type: "system",
-											text: metaLine,
-										});
-									}
-									if (summary) {
-										extra.push({
-											key: `toolsum-${next.length + extra.length}`,
-											type: "system",
+									if (!summary) return next;
+									return [
+										...next,
+										{
+											key: `toolsum-${next.length}`,
+											type: "system" as const,
 											text: summary,
-										});
-									}
-									return extra.length > 0 ? [...next, ...extra] : next;
+										},
+									];
 								});
 								return [];
 							});

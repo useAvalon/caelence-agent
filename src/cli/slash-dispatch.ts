@@ -41,7 +41,6 @@ export type SlashPickerKind =
 	| "image"
 	| "video"
 	| "transcribe"
-	| "speech"
 	| "skill"
 	| "integration";
 
@@ -63,7 +62,6 @@ const PICKER_KINDS = new Set<SlashPickerKind>([
 	"image",
 	"video",
 	"transcribe",
-	"speech",
 	"skill",
 	"integration",
 ]);
@@ -318,23 +316,9 @@ async function handleTranscribe(harness: HarnessRuntime, arg: string): Promise<S
 	}
 	return {
 		kind: "picker",
-		title: "Listen model",
+		title: "Speech model",
 		picker: "transcribe",
 		items: mediaPickerItems(models, readMediaPrefs().transcribeModel),
-	};
-}
-
-async function handleSpeech(harness: HarnessRuntime, arg: string): Promise<SlashOutcome> {
-	const models = await mediaModels(harness, "speech");
-	if (arg) {
-		writeMediaPrefs({ speechModel: arg });
-		return { kind: "applied" };
-	}
-	return {
-		kind: "picker",
-		title: "Speak model",
-		picker: "speech",
-		items: mediaPickerItems(models, readMediaPrefs().speechModel),
 	};
 }
 
@@ -460,7 +444,6 @@ const SLASH_HANDLERS: Record<string, SlashHandler> = {
 	image: (harness, arg) => handleMediaPicker(harness, arg, "image"),
 	video: (harness, arg) => handleMediaPicker(harness, arg, "video"),
 	transcribe: handleTranscribe,
-	speech: handleSpeech,
 	resume: handleResume,
 	eval: handleEval,
 	memory: handleMemory,
@@ -480,7 +463,6 @@ const MEDIA_PICKER_PREFS: Partial<Record<SlashPickerKind, (id: string) => void>>
 	image: (id) => writeMediaPrefs({ imageModel: id }),
 	video: (id) => writeMediaPrefs({ videoModel: id }),
 	transcribe: (id) => writeMediaPrefs({ transcribeModel: id }),
-	speech: (id) => writeMediaPrefs({ speechModel: id }),
 };
 
 async function applySkillPicker(

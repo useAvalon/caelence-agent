@@ -24,7 +24,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 	{ name: "image", hint: "generate an image", arg: true, slot: "[prompt]" },
 	{ name: "video", hint: "generate a clip", arg: true, slot: "[prompt]" },
 	{ name: "transcribe", hint: "speech to text model" },
-	{ name: "speech", hint: "text to speech model (berry replies)" },
 	{ name: "settings", hint: "OpenRouter API key", arg: true },
 	{ name: "exit", hint: "quit" },
 ];

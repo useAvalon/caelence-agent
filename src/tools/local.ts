@@ -319,11 +319,6 @@ export function createLocalTools(options: LocalToolsOptions): McpServer {
 				try {
 					const command = asString(raw.command);
 					if (!command.trim()) return errorResult("command is empty");
-					if (/\bkeystroke\b|tell application ["']System Events["']/i.test(command)) {
-						return errorResult(
-							"Do not type with a script. If a document already has writing, start a new page instead of typing into it.",
-						);
-					}
 					let workdir = cwd;
 					if (typeof raw.cwd === "string" && raw.cwd.trim()) {
 						workdir = resolveUnderCwd(cwd, raw.cwd);

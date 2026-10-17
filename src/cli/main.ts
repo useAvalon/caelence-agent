@@ -36,7 +36,6 @@ import {
 import { parseSkillCommand } from "../skills/skill-command.ts";
 import { userSkillsDir } from "../skills/user-dir.ts";
 import { startTui } from "./tui.tsx";
-import { formatTurnMetaLine } from "./turn-meta-line.ts";
 
 function printHelp(): void {
 	process.stdout.write(`${PRODUCT_NAME}
@@ -106,9 +105,6 @@ function printEvent(event: AgentEvent): void {
 			break;
 		case "error":
 			process.stderr.write(`\n${event.message}\n`);
-			break;
-		case "turn_meta":
-			process.stderr.write(`\n${formatTurnMetaLine(event)}\n`);
 			break;
 		case "completion":
 			process.stdout.write("\n");

@@ -9,7 +9,6 @@ import {
 	type McpAuthKind,
 	type McpCatalogEntry,
 } from "./catalog.ts";
-import { connectionSetup } from "./catalog-sync.ts";
 import type { LinkedMcpSource } from "./remote-mcp.ts";
 
 export interface StoredMcpConnection {
@@ -31,7 +30,6 @@ export interface PublicIntegration {
 	glyph: string;
 	connected: boolean;
 	auth?: McpAuthKind;
-	setup?: "connected" | "dcr" | "needs_setup";
 }
 
 interface StoreFile {
@@ -147,6 +145,5 @@ function toPublic(item: McpCatalogEntry, connected: boolean): PublicIntegration 
 		glyph: item.glyph,
 		connected,
 		...(item.auth ? { auth: item.auth } : {}),
-		setup: connectionSetup({ connected, auth: item.auth }),
 	};
 }

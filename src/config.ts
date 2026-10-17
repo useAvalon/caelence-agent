@@ -12,15 +12,6 @@ export interface ExtraMcpServerConfig {
 	env?: Record<string, string>;
 }
 
-export interface HarnessDecisionsConfig {
-	/** Use OpenRouter Jev for shortcuts and approval hints. Default on when an API key is set. */
-	enabled?: boolean;
-	model?: string;
-	minConfidence?: number;
-	shortcuts?: boolean;
-	approvals?: boolean;
-}
-
 export interface HarnessConfig {
 	name: string;
 	model: string;
@@ -38,8 +29,6 @@ export interface HarnessConfig {
 	/** Default agent. ask = read only. plan = read + todos. */
 	mode?: AgentMode;
 	hooks?: HookConfig[];
-	/** Jev decision model — see https://openrouter.ai/docs/guides/community/jev */
-	decisions?: HarnessDecisionsConfig;
 }
 
 export const DEFAULT_MODEL = "openrouter/auto";
@@ -54,11 +43,6 @@ export const DEFAULT_CONFIG: HarnessConfig = {
 	theme: "caelence",
 	tools: { exec: { approval: "prompt" } },
 	mcp: [],
-	decisions: {
-		enabled: true,
-		shortcuts: true,
-		approvals: true,
-	},
 };
 
 export function resolveConfigPath(cwd: string): string | undefined {
@@ -87,7 +71,6 @@ export async function loadConfig(cwd: string): Promise<HarnessConfig> {
 		memory: partial.memory,
 		mode: partial.mode,
 		hooks: partial.hooks,
-		decisions: { ...DEFAULT_CONFIG.decisions, ...partial.decisions },
 	};
 }
 

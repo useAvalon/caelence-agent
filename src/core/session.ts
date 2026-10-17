@@ -75,7 +75,9 @@ export function latestCompactionCover(session: Session): number {
 }
 
 /** Tool rows belong on the transcript, not in the next model prompt. */
-export function isModelContextMessage(message: SessionMessage): boolean {
+export function isModelContextMessage(
+	message: SessionMessage,
+): message is Extract<SessionMessage, { kind: "turn" | "system" | "compaction_checkpoint" }> {
 	return (
 		message.kind === "turn" || message.kind === "system" || message.kind === "compaction_checkpoint"
 	);

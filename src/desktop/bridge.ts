@@ -1,44 +1,25 @@
 import { randomBytes } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { resolveAgentCwd } from "../agent-cwd.ts";
-import {
-	DEFAULT_MODELS,
-	MODEL_ROLES,
-	type ModelRole,
-	modelFitsRole,
-	readRoleModels,
-	resetRoleModels,
-	writeRoleModels,
-} from "../cli/defaults.ts";
-import {
-	BERRY_SPEECH_MODEL,
-	DEFAULT_SPEECH_MODEL,
-	type MediaModelOption,
-	mediaModelLabel,
-	mediaPickerItems,
-	SPEECH_MODELS,
-} from "../cli/media-models.ts";
-import { BERRY_CHAT_MODEL, HARNESS_MODELS, modelPickerItems } from "../cli/models.ts";
+import { mediaModelLabel } from "../cli/media-models.ts";
+import { HARNESS_MODELS, modelPickerItems } from "../cli/models.ts";
 import {
 	cachedLiveTargetNames,
 	loadLiveTargetNames,
 	prettyLiveModelName,
 } from "../cli/openrouter-live.ts";
-import { cachedModalityModels, loadModalityModels } from "../cli/openrouter-modality.ts";
+import { cachedModalityModels } from "../cli/openrouter-modality.ts";
 import { sessionPickerItems } from "../cli/picker.ts";
 import { isHelpAlias } from "../cli/slash.ts";
 import { applyPickerChoice, isSlashPickerKind, runSlashLine } from "../cli/slash-dispatch.ts";
-import { registerNativeBridge } from "../computer/native/client.ts";
 import { resolveOpenRouter } from "../config.ts";
 import type { ApprovalRequest } from "../core/approval.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { AgentEvent } from "../core/events.ts";
-import type { McpToolDefinition } from "../core/mcp.ts";
 import { tryParseAgentMode } from "../core/mode.ts";
 import { normalizeSessionTitle, type Session, sessionTranscript } from "../core/session.ts";
 import { formatUsage } from "../core/usage.ts";
-import { stripBerryModeBanner } from "../decisions/screen-shortcut.ts";
 import {
 	connectMcp,
 	type OAuthCallback,
@@ -53,8 +34,8 @@ import {
 	listPublicMcps,
 	removeUserMcpServer,
 } from "../mcp/user-servers.ts";
-import { synthesizeSpeech, transcribeAudio } from "../media/openrouter-generate.ts";
-import { readMediaPrefs, writeMediaPrefs } from "../media/prefs.ts";
+import { transcribeAudio } from "../media/openrouter-generate.ts";
+import { readMediaPrefs } from "../media/prefs.ts";
 import { isMemoryEnabled, writeMemoryPrefs } from "../memory/prefs.ts";
 import { deleteFact, isFactPinned, listFacts, pinFact, unpinFact } from "../memory/store.ts";
 import { PRODUCT_NAME } from "../product.ts";
@@ -74,8 +55,6 @@ import {
 	skillNameFromCatalogId,
 } from "../skills/registry.ts";
 import { resolveUnderCwd, toProjectRel } from "../tools/paths.ts";
-import { BERRY_SYSTEM_APPEND } from "./berry-prompt.ts";
-import { createBerryTools } from "./berry-tools.ts";
 import { openResolvedPath, resolveLocalPath } from "./open-local.ts";
 import { readPreviewCache, writePreviewCache } from "./preview-cache.ts";
 import { filePreviewKind, filePreviewMime } from "./preview-kind.ts";
@@ -122,8 +101,6 @@ export interface StartDesktopBridgeOptions {
 	port?: number;
 	token?: string;
 	harness?: HarnessRuntime;
-	extraTools?: McpToolDefinition[];
-	extraSystemAppend?: string;
 	openUrl?: (url: string) => void;
 	openPath?: (path: string, reveal: boolean) => void;
 }
@@ -158,22 +135,17 @@ function modelLabel(id: string): string {
 function settingsPayload(harness: HarnessRuntime) {
 	const google = readProviderOAuth("google");
 	const microsoft = readProviderOAuth("microsoft");
-	const prefs = readMediaPrefs();
 	return {
 		hasApiKey: harness.hasApiKey,
 		apiKeyHint: harness.hasApiKey ? maskSecret(process.env.OPENROUTER_API_KEY ?? "") : "",
 		mode: harness.mode,
 		modelId: harness.modelId,
 		modelLabel: modelLabel(harness.modelId),
-		speechModelId: prefs.speechModel,
-		speechModelLabel: mediaModelLabel(cachedModalityModels("speech"), prefs.speechModel),
 		hasGoogleOAuth: Boolean(google?.clientId),
 		googleOAuthHint: google?.clientId ? maskSecret(google.clientId) : "",
 		hasMicrosoftOAuth: Boolean(microsoft?.clientId),
 		microsoftOAuthHint: microsoft?.clientId ? maskSecret(microsoft.clientId) : "",
 		memoryEnabled: isMemoryEnabled({ configEnabled: harness.config.memory?.enabled }),
-		roles: { ...DEFAULT_MODELS, ...readRoleModels() },
-		roleDefaults: DEFAULT_MODELS,
 	};
 }
 
@@ -371,16 +343,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 	const token = options.token ?? randomBytes(24).toString("hex");
 	const openUrl = options.openUrl ?? openSystemBrowser;
 	if (!options.harness) applyStoredOpenRouterKey();
-	const harness =
-		options.harness ??
-		(await createHarness({
-			cwd: options.cwd,
-			extraTools: options.extraTools,
-			extraSystemAppend: options.extraSystemAppend,
-		}));
-	if (process.env.HARNESS_BERRY === "1" && !harness.modelId) {
-		harness.setModel(BERRY_CHAT_MODEL);
-	}
+	const harness = options.harness ?? (await createHarness({ cwd: options.cwd }));
 	const openPath =
 		options.openPath ??
 		((path: string, reveal: boolean) => {
@@ -456,48 +419,8 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		return json({ items: sessionPickerItems(await harness.store.list()) });
 	};
 
-	const route_get_transcript = async (_req: Request, _url: URL): Promise<Response> => {
-		const id = harness.activeSessionId;
-		const session = id ? await harness.store.get(id) : undefined;
-		const messages = chatMessages(session).map((line) =>
-			line.kind === "user" || line.kind === "assistant"
-				? { ...line, text: stripBerryModeBanner(line.text) }
-				: line,
-		);
-		return json({ messages });
-	};
-
 	const route_get_models = async (_req: Request, _url: URL): Promise<Response> => {
-		const extras = Object.values(DEFAULT_MODELS).map((id) => ({
-			id,
-			label: id,
-		}));
-		const items = [
-			...extras.filter((row) => !HARNESS_MODELS.some((model) => model.id === row.id)),
-			...modelPickerItems(harness.modelId, cachedLiveTargetNames()),
-		];
-		return json({ items });
-	};
-
-	const route_get_speech_models = async (_req: Request, _url: URL): Promise<Response> => {
-		const prefs = readMediaPrefs();
-		const or = resolveOpenRouter(harness.config);
-		const live = harness.hasApiKey
-			? await loadModalityModels({
-					modality: "speech",
-					apiKey: or.apiKey,
-					baseUrl: or.baseUrl,
-				})
-			: [];
-		const byId = new Map<string, MediaModelOption>();
-		for (const row of SPEECH_MODELS) byId.set(row.id, row);
-		for (const row of live) {
-			if (!byId.has(row.id)) byId.set(row.id, row);
-		}
-		const merged = [...byId.values()].sort((a, b) => a.label.localeCompare(b.label));
-		return json({
-			items: mediaPickerItems(merged, prefs.speechModel),
-		});
+		return json({ items: modelPickerItems(harness.modelId, cachedLiveTargetNames()) });
 	};
 
 	const route_get_settings = async (_req: Request, _url: URL): Promise<Response> => {
@@ -733,33 +656,6 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		}
 	};
 
-	const route_post_speak = async (req: Request, _url: URL): Promise<Response> => {
-		if (!harness.hasApiKey) {
-			return json({ error: "OpenRouter API key is missing. Add it in Settings." }, 400);
-		}
-		const body = await readJson(req);
-		const text = typeof body.text === "string" ? body.text.trim() : "";
-		if (!text) return json({ error: "text is empty." }, 400);
-		if (text.length > 4096) return json({ error: "text is too long." }, 413);
-		try {
-			const or = resolveOpenRouter(harness.config);
-			const prefs = readMediaPrefs();
-			const speechModel =
-				process.env.HARNESS_BERRY === "1" && prefs.speechModel === DEFAULT_SPEECH_MODEL
-					? BERRY_SPEECH_MODEL
-					: prefs.speechModel;
-			const audio = await synthesizeSpeech({
-				text,
-				model: speechModel,
-				apiKey: or.apiKey,
-				baseUrl: or.baseUrl,
-			});
-			return json(audio);
-		} catch (err) {
-			return json({ error: errorMessage(err) || "Speech synthesis failed." }, 502);
-		}
-	};
-
 	const route_post_transcribe = async (req: Request, _url: URL): Promise<Response> => {
 		if (!harness.hasApiKey) {
 			return json({ error: "OpenRouter API key is missing. Add it in Settings." }, 400);
@@ -803,28 +699,6 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		saveProviderOAuth(body, "microsoft");
 		if (typeof body.memoryEnabled === "boolean") {
 			writeMemoryPrefs({ enabled: body.memoryEnabled });
-		}
-		if (typeof body.speechModel === "string" && body.speechModel.trim()) {
-			writeMediaPrefs({ speechModel: body.speechModel.trim() });
-		}
-		if (body.resetRoles === true) {
-			resetRoleModels();
-		}
-		if (body.roles && typeof body.roles === "object") {
-			const patch: Partial<Record<ModelRole, string>> = {};
-			for (const role of MODEL_ROLES) {
-				const value = (body.roles as Record<string, unknown>)[role];
-				if (typeof value !== "string" || !value.trim()) continue;
-				const blocked = modelFitsRole(role, {
-					tools: role === "navigator" || role === "writer" ? true : undefined,
-					image: role === "vision" ? true : undefined,
-				});
-				if (blocked && value.includes("text-only")) {
-					return json({ error: blocked }, 400);
-				}
-				patch[role] = value.trim();
-			}
-			if (Object.keys(patch).length) writeRoleModels(patch);
 		}
 		return json({
 			ok: true,
@@ -1016,11 +890,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		if (editUserTurn === undefined && incoming.trim().startsWith("/")) {
 			return runSlashTurn(incoming);
 		}
-		const berryConversational =
-			process.env.HARNESS_BERRY === "1" ? body.berryConversational === true : undefined;
-		const berryAutoApprove =
-			process.env.HARNESS_BERRY === "1" ? body.berryAutoApprove === true : undefined;
-		return startTurnStream(message, editUserTurn, berryConversational, berryAutoApprove);
+		return startTurnStream(message, editUserTurn);
 	};
 
 	const parseEditUserTurn = (value: unknown): number | undefined => {
@@ -1039,12 +909,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		return json({ outcome, state: snapshot(harness, busy, title) });
 	};
 
-	const startTurnStream = (
-		message: string,
-		editUserTurn?: number,
-		berryConversational?: boolean,
-		berryAutoApprove?: boolean,
-	): Response => {
+	const startTurnStream = (message: string, editUserTurn?: number): Response => {
 		busy = true;
 		abort = new AbortController();
 		const encoder = new TextEncoder();
@@ -1071,8 +936,6 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 						signal: abort?.signal,
 						approvalAsk: (req: ApprovalRequest) => waitForApproval(pending, req),
 						...(editUserTurn !== undefined ? { editUserTurn } : {}),
-						...(berryConversational !== undefined ? { berryConversational } : {}),
-						...(berryAutoApprove !== undefined ? { berryAutoApprove } : {}),
 					})
 					.catch((err) => {
 						send({
@@ -1105,24 +968,11 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		});
 	};
 
-	const route_post_computer_native = async (req: Request): Promise<Response> => {
-		const body = await readJson(req);
-		const url = typeof body.url === "string" ? body.url.trim() : "";
-		const nativeToken = typeof body.token === "string" ? body.token.trim() : "";
-		if (!url.startsWith("http://127.0.0.1") || !nativeToken) {
-			return json({ error: "Native bridge must be loopback HTTP with a token." }, 400);
-		}
-		registerNativeBridge(url, nativeToken);
-		return json({ ok: true });
-	};
-
 	const bridgeRoutes: Record<string, (req: Request, url: URL) => Promise<Response>> = {
 		"GET /health": route_get_health,
 		"GET /state": route_get_state,
 		"GET /sessions": route_get_sessions,
-		"GET /transcript": route_get_transcript,
 		"GET /models": route_get_models,
-		"GET /speech-models": route_get_speech_models,
 		"GET /settings": route_get_settings,
 		"GET /integrations": route_get_integrations,
 		"POST /integrations/connect": route_post_integrations_connect,
@@ -1142,7 +992,6 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		"POST /embed": route_post_embed,
 		"GET /embed": route_get_embed,
 		"POST /transcribe": route_post_transcribe,
-		"POST /speak": route_post_speak,
 		"GET /memory": route_get_memory,
 		"POST /memory": route_post_memory,
 		"POST /uploads/delete": route_post_uploads_delete,
@@ -1156,7 +1005,6 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		"POST /approve": route_post_approve,
 		"POST /abort": route_post_abort,
 		"POST /turn": route_post_turn,
-		"POST /computer/native": route_post_computer_native,
 	};
 
 	const server = Bun.serve({
@@ -1213,21 +1061,8 @@ export async function main(): Promise<void> {
 		start: process.env.HARNESS_CWD?.trim() || process.cwd(),
 		explicit: process.env.HARNESS_CWD_EXPLICIT?.trim(),
 	});
-	const berry = process.env.HARNESS_BERRY === "1";
-	const { ready } = await startDesktopBridge({
-		cwd,
-		extraTools: berry ? createBerryTools(undefined, { includeSearch: true }) : undefined,
-		extraSystemAppend: berry ? BERRY_SYSTEM_APPEND : undefined,
-	});
-	const readyLine = `HARNESS_READY=${JSON.stringify(ready)}\n`;
-	process.stdout.write(readyLine);
-	if (berry) {
-		process.stderr.write(readyLine);
-		const readyFile = process.env.HARNESS_BERRY_READY_FILE?.trim();
-		if (readyFile) {
-			await writeFile(readyFile, readyLine);
-		}
-	}
+	const { ready } = await startDesktopBridge({ cwd });
+	process.stdout.write(`HARNESS_READY=${JSON.stringify(ready)}\n`);
 }
 
 if (import.meta.main) {

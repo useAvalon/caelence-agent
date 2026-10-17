@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Session } from "../core/session.ts";
 import type { HarnessRuntime } from "../runtime.ts";
 import { clearPopularSkillsCache, writePopularSkillsCache } from "../skills/catalog.ts";
-import { BERRY_CHAT_MODEL, HARNESS_MODELS } from "./models.ts";
+import { HARNESS_MODELS } from "./models.ts";
 import { applyPickerChoice, dispatchSlash, runSlashLine } from "./slash-dispatch.ts";
 
 function fakeHarness(overrides: Partial<HarnessRuntime> = {}): HarnessRuntime {
@@ -344,10 +344,5 @@ describe("HARNESS_MODELS", () => {
 	test("lists Auto first", () => {
 		expect(HARNESS_MODELS[0]).toEqual({ id: "openrouter/auto", label: "Auto" });
 		expect(HARNESS_MODELS.some((model) => model.id === "openrouter/auto-beta")).toBe(true);
-	});
-
-	test("berry default is Gemini Flash, separate from Auto", () => {
-		expect(BERRY_CHAT_MODEL).toBe("~google/gemini-flash-latest");
-		expect(HARNESS_MODELS[0]?.id).toBe("openrouter/auto");
 	});
 });
