@@ -256,7 +256,7 @@ export async function runTurn(
 					// The berry bridge is absent in the terminal UI.
 				}
 			}
-			if (useComputer) {
+			if (useComputer && session) {
 				const navigator =
 					deps.resolveProvider?.(modelFor("navigator"), "navigator") ?? deps.provider;
 				const writer = deps.resolveProvider?.(modelFor("writer"), "writer") ?? deps.provider;

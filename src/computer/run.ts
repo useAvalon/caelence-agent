@@ -191,11 +191,12 @@ export async function runComputerTask(input: {
 			const workMessage = redo && lastCompose.task ? lastCompose.task : input.message;
 			const planned = planScreenWork(workMessage);
 			const dest = planned.dest ?? site;
+			const prevDest = lastCompose.dest;
 			const destChanged =
-				Boolean(dest) &&
-				Boolean(lastCompose.dest) &&
-				dest.toLowerCase() !== lastCompose.dest.toLowerCase() &&
-				hostOfUrl(dest) !== hostOfUrl(lastCompose.dest);
+				dest != null &&
+				prevDest.length > 0 &&
+				dest.toLowerCase() !== prevDest.toLowerCase() &&
+				hostOfUrl(dest) !== hostOfUrl(prevDest);
 			if (planned.put === "app" && dest && catalogPageBody(workMessage, lastCompose.copy)) {
 				emitComposeProgress(emit, "type");
 				const typed = await typeIntoMacApp(dest, lastCompose.copy);

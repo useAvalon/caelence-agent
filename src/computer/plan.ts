@@ -38,7 +38,7 @@ export function planScreenWork(message: string): ScreenWork {
 	const save = saveTargetName(latest);
 
 	if (match && (save || dest || isolatedName(latest, match.label))) {
-		const elsewhere = Boolean(readUrl) && dest && hostOfUrl(readUrl) !== hostOfUrl(dest);
+		const elsewhere = Boolean(readUrl && dest && hostOfUrl(readUrl) !== hostOfUrl(dest));
 		return {
 			source: elsewhere ? "url" : "front",
 			readUrl: elsewhere ? readUrl : undefined,
@@ -56,7 +56,7 @@ export function planScreenWork(message: string): ScreenWork {
 		};
 	}
 	if (dest) {
-		const elsewhere = Boolean(readUrl) && hostOfUrl(readUrl) !== hostOfUrl(dest);
+		const elsewhere = Boolean(readUrl && hostOfUrl(readUrl) !== hostOfUrl(dest));
 		return {
 			source: elsewhere ? "url" : "front",
 			readUrl: elsewhere ? readUrl : undefined,
