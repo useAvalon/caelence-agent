@@ -57,6 +57,7 @@ export {
 	createFileSessionStore,
 	createMemorySessionStore,
 	estimateTokens,
+	isModelContextMessage,
 	latestCompactionCover,
 	liveContextTokens,
 	type Session,

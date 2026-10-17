@@ -67,6 +67,34 @@ describe("session store", () => {
 				"user",
 				"assistant",
 			]);
+			expect(sessionToProviderMessages(session).some((line) => line.content.includes("abc"))).toBe(
+				false,
+			);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("tool payloads do not count toward live model context", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-tool-ctx-"));
+		try {
+			const store = createFileSessionStore(cwd);
+			let session = await store.create("system");
+			session = await store.append(session, { kind: "turn", role: "user", content: "hi" });
+			session = await store.append(session, {
+				kind: "tool",
+				name: "read_file",
+				callId: "c1",
+				status: "ok",
+				preview: "big.ts",
+				output: "x".repeat(20_000),
+			});
+			session = await store.append(session, { kind: "turn", role: "assistant", content: "ok" });
+			expect(liveContextTokens(session)).toBeLessThan(400);
+			expect(sessionToProviderMessages(session)).toEqual([
+				{ role: "user", content: "hi" },
+				{ role: "assistant", content: "ok" },
+			]);
 		} finally {
 			await rm(cwd, { recursive: true, force: true });
 		}

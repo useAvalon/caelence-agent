@@ -19,6 +19,7 @@ import { modePrompt } from "./mode.ts";
 import {
 	compactionSummaries,
 	DEFAULT_CONTEXT_WINDOW_TOKENS,
+	isModelContextMessage,
 	replaceUserTurn,
 	type Session,
 	type SessionMessage,
@@ -504,11 +505,10 @@ export function buildSystemPrompt(input: {
 export function defaultSummarizer(provider: MainModelProvider): SummarizerFn {
 	return async ({ messages }) => {
 		const text = messages
+			.filter(isModelContextMessage)
 			.map((m) => {
 				if (m.kind === "turn") return `${m.role}: ${m.content}`;
 				if (m.kind === "system") return `system: ${m.text}`;
-				if (m.kind === "tool") return `tool ${m.name}: ${m.preview}`;
-				if (m.kind === "thought") return `thought: ${m.text}`;
 				return `summary: ${m.summary}`;
 			})
 			.join("\n")
