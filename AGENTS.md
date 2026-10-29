@@ -38,7 +38,7 @@ Do not invent customers, metrics, testimonials, or other proof. Product UI shoul
 
 ## Collaboration
 
-Fork, branch from `main`, open a pull request. Do not push to `main`. Squash merge is the only method. CI is lint, typecheck, and tests. The maintainer (`@MadsHaerup`) reviews before merge. Human details are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Fork, branch from `main`, open a pull request. Do not push to `main`. Squash merge is the only method. CI is lint, typecheck, tests, and a changeset check. A change to shipped files (`src/`, `bin/`, `skills/`, `desktop/`) needs a `bunx changeset` file, and versions are never edited by hand (see CONTRIBUTING.md). The maintainer (`@MadsHaerup`) reviews before merge. Human details are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Keep a change to one problem. Match the style of the files you touch. Desktop UI, layout, or client-state work needs an end-to-end check in the window, not only a screenshot.
 
