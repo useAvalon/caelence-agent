@@ -22,6 +22,6 @@ There are no canary releases. Add the **`pr preview`** label to a pull request t
 
 ## Setup the repo needs
 
-- **Settings, Actions, General:** enable **Allow GitHub Actions to create and approve pull requests**.
+- **Settings, Actions, General:** keep **Allow GitHub Actions to create and approve pull requests** enabled.
 - **Checks on the version pull request.** A pull request opened with the workflow's own token does not start CI, so its required checks stay missing. Close and reopen the pull request once to run them, or open it with a GitHub App or personal access token instead.
 - **npm trusted publishing** stays bound to the `release.yml` workflow file.
