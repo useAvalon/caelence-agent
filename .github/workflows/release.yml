@@ -1,174 +1,48 @@
+# Pending changesets on main -> "release: version packages" PR. Merging that PR -> publish, tag, GitHub Release.
+# Lint, typecheck, and tests run in ci.yml on every PR (including the version PR) before it merges.
+#
+# Auth is npm trusted publishing (OIDC), not an NPM_TOKEN secret. On npmjs.com add a GitHub Actions
+# trusted publisher for this repo and workflow filename `release.yml`. npm CLI 11.5.1+ exchanges the
+# Actions id-token at publish time.
+#
+# Repo setting needed: Settings -> Actions -> General -> "Allow GitHub Actions to create and approve
+# pull requests". See .changeset/README.md.
 name: Release
-
-# Manual workflow for publishing beta, rc, and stable releases.
-# Auto-detects the semver bump from conventional commit messages since the last
-# release tag; use bump-override to force a specific bump.
-#
-# Auth is npm trusted publishing (OIDC), not an NPM_TOKEN secret. On npmjs.com
-# add a GitHub Actions trusted publisher for this repo and workflow filename
-# `release.yml`. npm CLI 11.5.1+ exchanges the Actions id-token at publish time.
-#
-# The version-bump PR step is best-effort: many orgs disable "Allow GitHub Actions
-# to create pull requests". Publish and tagging still succeed; merge release/v* manually.
-
 on:
-  workflow_dispatch:
-    inputs:
-      bump-override:
-        description: "Version bump (auto = detect from commits)"
-        required: true
-        type: choice
-        default: auto
-        options:
-          - auto
-          - patch
-          - minor
-          - major
-      channel:
-        description: "Release channel"
-        required: true
-        type: choice
-        options:
-          - stable
-          - beta
-          - rc
-      dry-run:
-        description: "Dry run (no publish/tag)"
-        required: false
-        type: boolean
-        default: true
-
+  push:
+    branches: [main]
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 permissions:
   contents: write
-  id-token: write
   pull-requests: write
-
+  id-token: write
 jobs:
   release:
-    name: Release (${{ inputs.channel }})
+    if: github.repository_owner == 'useAvalon'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-
       - run: npm install -g npm@latest
-      - run: bun install
-      - run: bun run typecheck
-      - run: bun run test
-      - run: bun run check:exports
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Detect semver bump
-        id: detect
-        run: |
-          OVERRIDE="${{ inputs.bump-override }}"
-          if [ "$OVERRIDE" != "auto" ]; then
-            echo "bump=$OVERRIDE" >> "$GITHUB_OUTPUT"
-            echo "::notice::Bump: $OVERRIDE (manual override)"
-            exit 0
-          fi
-          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
-          if [ -z "$LAST_TAG" ]; then
-            RANGE=""
-            echo "::notice::No previous tag; scanning all commits."
-          else
-            RANGE="${LAST_TAG}..HEAD"
-            echo "::notice::Last tag: $LAST_TAG"
-          fi
-          SUBJECTS=$(git log $RANGE --format='%s')
-          BODIES=$(git log $RANGE --format='%B')
-          BUMP="patch"
-          if echo "$BODIES" | grep -qiE '^BREAKING[ -]CHANGE:' \
-            || echo "$SUBJECTS" | grep -qE '^(feat|fix|chore|refactor|perf|build|ci|docs|style|test|revert)(\(.*\))?!:'; then
-            BUMP="major"
-          elif echo "$SUBJECTS" | grep -qE '^feat(\(.*\))?:'; then
-            BUMP="minor"
-          fi
-          if [ -z "$LAST_TAG" ] && [ "$BUMP" = "patch" ]; then
-            BUMP="minor"
-          fi
-          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
-          echo "::notice::Detected bump: $BUMP"
-
-      - name: Bump version
-        id: version
-        run: |
-          BUMP="${{ steps.detect.outputs.bump }}"
-          CHANNEL="${{ inputs.channel }}"
-          if [ "$CHANNEL" = "stable" ]; then
-            NEW=$(npm version "$BUMP" --no-git-tag-version)
-          else
-            NEW=$(npm version "pre${BUMP}" --preid="$CHANNEL" --no-git-tag-version)
-          fi
-          VERSION="${NEW#v}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "::notice::New version: ${NEW}"
-          NAME=$(node -p "require('./package.json').name")
-          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${NAME}@${VERSION} is already on npm; skip publish."
-          else
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish to npm
-        run: |
-          TAG="${{ inputs.channel }}"
-          [ "$TAG" = "stable" ] && TAG="latest"
-          if [ "${{ steps.version.outputs.already_published }}" = "true" ]; then
-            echo "Skip publish: ${{ steps.version.outputs.version }} is already on npm."
-            exit 0
-          fi
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
-            echo "[DRY RUN] npm publish --tag $TAG"
-            npm publish --dry-run --tag "$TAG"
-          else
-            npm publish --tag "$TAG" --access public
-          fi
-
-      - name: Tag, GitHub Release, and version PR
-        if: ${{ inputs.dry-run == false }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v${VERSION}"
-          BRANCH="release/v${VERSION}"
-          git checkout -B "$BRANCH"
-          git add package.json bun.lock 2>/dev/null || git add package.json
-          if git diff --cached --quiet; then
-            echo "Version commit already on ${BRANCH}."
-          else
-            git commit -m "release: v${VERSION}"
-          fi
-          git push -u origin "$BRANCH"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists."
-          else
-            git tag "$TAG"
-            git push origin "$TAG"
-          fi
-          if ! gh pr list --head "$BRANCH" --base main --json number --jq '.[0].number' | grep -q '[0-9]'; then
-            if ! gh pr create --base main --head "$BRANCH" --title "release: v${VERSION}" --body "Version bump from the release workflow. npm already published this version."; then
-              echo "::warning::Actions cannot open PRs in this repo (org setting). Merge ${BRANCH} into main manually: https://github.com/useAvalon/caelence-agent/compare/main...${BRANCH}"
-            fi
-          fi
-          PRERELEASE=""
-          [ "${{ inputs.channel }}" != "stable" ] && PRERELEASE="--prerelease"
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "v${VERSION}" --generate-notes $PRERELEASE
-          fi
+          # @changesets/changelog-github reads this to link PRs and authors in the changelog.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          version-script: bun run version
+          publish-script: bun run release
+          commit-message: "release: version packages"
+          pr-title: "release: version packages"
+          create-github-releases: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}

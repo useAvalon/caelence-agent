@@ -10,6 +10,43 @@ permissions:
   contents: read
 
 jobs:
+  changeset:
+    name: Changeset
+    # Same-repo PRs only (a fork cannot be labeled by the workflow). The version PR is exempt.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !startsWith(github.head_ref, 'changeset-release/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require a changeset when shipped files change
+        env:
+          # Passed through env, never interpolated into the script, so a PR title cannot inject shell.
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          CHANGED=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+          # What ships: package.json "files" (bin, src, skills, desktop). Tests and READMEs do not count.
+          SHIPPED=$(echo "$CHANGED" | grep -E '^(src|bin|skills|desktop)/' | grep -vE '\.test\.tsx?$|(^|/)README\.md$' || true)
+          if [ -z "$SHIPPED" ]; then
+            echo "No shipped files changed. A changeset is not required."
+            exit 0
+          fi
+          if echo "$PR_LABELS" | grep -q '"no changeset"'; then
+            echo "Skipped: PR has the 'no changeset' label."
+            exit 0
+          fi
+          if echo "$CHANGED" | grep -E '^\.changeset/.+\.md$' | grep -qv '^\.changeset/README\.md$'; then
+            echo "Changeset file present."
+            exit 0
+          fi
+          echo "::error::Shipped files changed without a changeset. Run 'bunx changeset' and commit .changeset/*.md, or add the 'no changeset' label if npm should not change."
+          echo "$SHIPPED" | head -20
+          exit 1
   lint:
     name: Lint (Biome)
     runs-on: ubuntu-latest

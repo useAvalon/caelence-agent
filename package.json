@@ -44,6 +44,9 @@
     "format": "biome format --write .",
     "check": "biome check --write .",
     "check:exports": "node scripts/check-exports.mjs",
+    "changeset": "changeset",
+    "version": "changeset version && bun install",
+    "release": "node scripts/release.mjs",
     "prepare": "[ -d .git ] && husky || true",
     "prepublishOnly": "bun run typecheck && bun run test && bun run check:exports",
     "desktop": "bun src/cli/main.ts desktop"
@@ -67,6 +70,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "@types/bun": "^1.3.14",
     "@types/react": "^18.3.18",
     "husky": "^9.1.7",
