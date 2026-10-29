@@ -1,10 +1,12 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { BrowserConfig } from "./browser/browser-use.ts";
 import type { Theme, ThemeName } from "./cli/theme.ts";
 import type { ExecApprovalPolicy } from "./core/approval.ts";
 import type { HookConfig } from "./core/hooks.ts";
 import type { AgentMode } from "./core/mode.ts";
+import type { HarnessDecisionsConfig } from "./decisions/config.ts";
 
 export interface ExtraMcpServerConfig {
 	command: string;
@@ -29,6 +31,18 @@ export interface HarnessConfig {
 	/** Default agent. ask = read only. plan = read + todos. */
 	mode?: AgentMode;
 	hooks?: HookConfig[];
+	/**
+	 * Browser control through browser-use. Needs `uv`. Off until a message has @browser,
+	 * or always on with enabled: true. enabled: false turns it off even for @browser.
+	 */
+	browser?: BrowserConfig;
+	/**
+	 * Decision-model calls through OpenRouter (Jev). They answer yes/no and pick-one questions
+	 * without generating text, so they cost far less than a chat call. On by default when an
+	 * OpenRouter key is set; the user's request and tool inputs are sent to TypeSafe via OpenRouter.
+	 * Turn everything off with `enabled: false` or HARNESS_JEV=0.
+	 */
+	decisions?: HarnessDecisionsConfig;
 }
 
 export const DEFAULT_MODEL = "openrouter/auto";
@@ -71,6 +85,8 @@ export async function loadConfig(cwd: string): Promise<HarnessConfig> {
 		memory: partial.memory,
 		mode: partial.mode,
 		hooks: partial.hooks,
+		browser: partial.browser,
+		decisions: partial.decisions,
 	};
 }
 

@@ -55,6 +55,8 @@ export default {
 	mode: "agent",
 	tools: { exec: { approval: "prompt" } },
 	mcp: [],
+	// browser: { enabled: true }, // see Browser
+	// decisions: { enabled: false }, // see Decisions
 } satisfies HarnessConfig;
 ```
 
@@ -166,6 +168,56 @@ Each connection is stored in `~/.harness/integrations.json`, and disconnecting r
 | `agent` | Writes, `exec`, `git_commit`, and `task` |
 
 Start in `ask`, `plan`, or `agent` with `/mode`, which changes which tools are available. `exec` and `git_commit` prompt for approval by default (`prompt`), and `auto` still refuses destructive commands. Local exec is the host machine rather than a sandbox.
+
+## Decisions
+
+Some choices need an answer but no text. For those the harness asks a decision model, [Jev](https://openrouter.ai/docs/guides/community/jev) from TypeSafe through OpenRouter, instead of a chat model. It returns a probability for a yes/no or pick-one question, and each call costs about a hundredth of a cent. It is on whenever an OpenRouter key is set.
+
+| Decision | What it does |
+|----------|--------------|
+| Approval | Before a permission prompt for `exec`, `git_commit`, or a file write, asks whether the call matches your request and is easy to undo. At 0.9 or higher it runs without asking. Otherwise you are asked as before |
+| Memory | When memory is on, asks whether a turn holds anything worth keeping. If clearly not, it skips the extraction call |
+| Shortcuts | A host can answer a message with one tool call and skip the chat model. See `shortcut` in `createHarness` |
+
+A decision can only remove a prompt or a model call. It never refuses anything, and destructive commands and upload edits always ask. If the call fails, times out after 4 seconds, or the score is unsure, the harness does what it did before.
+
+What leaves your machine: for approvals, your message and the tool call (long values are clipped to 600 characters). For memory, the turn text, clipped to 3,000 characters. Both go to TypeSafe through OpenRouter.
+
+```ts
+decisions: {
+	enabled: true,          // false turns every decision off. HARNESS_JEV=0 does the same
+	approvals: true,
+	memory: true,
+	shortcuts: true,
+	approvalThreshold: 0.9, // chance of "safe to run" needed to skip a prompt
+	model: "typesafe/jev-1.14",
+},
+```
+
+The model is pinned because probabilities shift between releases. If you change it, check the thresholds again.
+
+## Browser
+
+The agent can drive a real Chrome window through [browser-use](https://docs.browser-use.com/open-source/introduction). It is off until you ask for it. Put `@browser` in a message and the browser tools are available for the rest of that chat, for example `@browser find the pricing page on example.com`.
+
+It needs [`uv`](https://docs.astral.sh/uv/) on your `PATH`. The first use downloads browser-use (about 100 Python packages) and can take a minute. Later starts take a few seconds, and the server only starts when you first use it.
+
+To change the default, set `browser` in `harness.config.ts`:
+
+```ts
+browser: { enabled: true, headless: false },
+```
+
+| Setting | Effect |
+|---------|--------|
+| `enabled` unset | On for chats where a message contains `@browser` |
+| `enabled: true` | Always available, no mention needed |
+| `enabled: false` | Never available, `@browser` is ignored |
+| `headless: true` | Run Chrome without a window. Default is a visible window |
+
+The tools are `browser_navigate`, `browser_get_state`, `browser_click`, `browser_type`, `browser_scroll`, `browser_get_html`, `browser_go_back`, and tab and session management. The agent reads the page as a list of numbered elements and clicks by number. They only run in `agent` mode.
+
+browser-use uses its own Chrome profile in `~/.config/browseruse/profiles/default`, so it does not see your everyday Chrome sign-ins. Sign in once in that window and it stays. Telemetry and cloud sync are switched off. `browser_extract_content`, `browser_screenshot`, and browser-use's own sub-agent are not exposed, because they need a separate OpenAI key or return images. The agent is told to ask before buying, sending, posting, or deleting, but browser tool calls are not gated by an approval prompt the way `exec` is.
 
 ## Memory
 

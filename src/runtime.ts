@@ -1,4 +1,13 @@
 import { resolve } from "node:path";
+import {
+	type BrowserSession,
+	browserAccess,
+	browserFailurePrompt,
+	browserPrompt,
+	browserSetupHint,
+	mentionsBrowser,
+	startBrowserTools,
+} from "./browser/browser-use.ts";
 import { resolveTheme, type Theme } from "./cli/theme.ts";
 import { type HarnessConfig, loadConfig, resolveOpenRouter } from "./config.ts";
 import {
@@ -37,12 +46,17 @@ import {
 	createConstructAgent,
 } from "./core/strands.ts";
 import { addUsage, type TokenUsage } from "./core/usage.ts";
+import { classifyToolApproval } from "./decisions/approval.ts";
+import type { FetchImpl } from "./decisions/client.ts";
+import { type ResolvedDecisions, resolveDecisions } from "./decisions/config.ts";
+import { turnHasDurableFact } from "./decisions/memory.ts";
+import type { ShortcutPlanner } from "./decisions/shortcuts.ts";
 import { listUploadOriginals, matchUploadEdit } from "./desktop/uploads.ts";
 import { type ChatFn, createOpenRouterChat } from "./evals/runner.ts";
 import { buildRemoteMcpTools } from "./integrations/remote-mcp.ts";
 import { linkedMcpSources } from "./integrations/store.ts";
 import { listUserMcpServers, userMcpToolPrefix } from "./mcp/user-servers.ts";
-import { extractMemories } from "./memory/extract.ts";
+import { extractMemories, turnMemorySource } from "./memory/extract.ts";
 import { isMemoryEnabled } from "./memory/prefs.ts";
 import { formatRetrievedMemory } from "./memory/prompt.ts";
 import { searchFacts } from "./memory/store.ts";
@@ -138,6 +152,17 @@ export interface CreateHarnessOptions {
 	mode?: AgentMode;
 	/** Load one-click MCP connections from ~/.harness. Default on unless a test provider is passed. */
 	loadIntegrations?: boolean;
+	/** Replaces the stdio MCP loader for the browser server. Tests only. */
+	browserLoader?: typeof loadStdioMcpTools;
+	/**
+	 * Decision-model calls (approval assist, memory gate, shortcuts). On when an OpenRouter key
+	 * is set, off for an injected test `provider` unless this is true.
+	 */
+	decisions?: boolean;
+	/** Host judgment of which messages are one direct tool call. See ShortcutPlanner. */
+	shortcut?: ShortcutPlanner;
+	/** Replaces fetch for decision calls. Tests only. */
+	decisionsFetch?: FetchImpl;
 }
 
 const SUBAGENT_INSTRUCTIONS = [
@@ -244,6 +269,28 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	await reloadIntegrations();
 	await reloadExtraMcp();
 
+	// Browser (browser-use over MCP). Started lazily so non-browser users never pay for it.
+	let browserStart: Promise<BrowserSession> | undefined;
+	let browserSticky = false;
+	let browserTools: McpToolDefinition[] = [];
+	let browserNote = "";
+	const resolveBrowser = async (message: string): Promise<void> => {
+		browserTools = [];
+		browserNote = "";
+		const access = browserAccess(config.browser);
+		if (access === "off" || mode !== "agent") return;
+		if (mentionsBrowser(message)) browserSticky = true;
+		if (access !== "always" && !browserSticky) return;
+		try {
+			browserStart ??= startBrowserTools(config.browser, cwd, options.browserLoader);
+			browserTools = (await browserStart).tools;
+			browserNote = browserPrompt();
+		} catch (err) {
+			browserStart = undefined;
+			browserNote = browserFailurePrompt(browserSetupHint(err));
+		}
+	};
+
 	const or = resolveOpenRouter(config);
 	let apiKey = or.apiKey;
 	let modelId = or.model;
@@ -278,6 +325,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			...extra,
 			...extraMcpTools,
 			...integrationTools,
+			...browserTools,
 			createReadSkillTool(skills),
 		]);
 
@@ -291,6 +339,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				mode,
 			}),
 			extraSystem.trim(),
+			browserNote,
 		]
 			.filter(Boolean)
 			.join("\n\n");
@@ -317,6 +366,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			return activeSessionId;
 		},
 		set activeSessionId(id: string | undefined) {
+			if (id !== activeSessionId) browserSticky = false;
 			activeSessionId = id;
 		},
 		get hasApiKey() {
@@ -338,6 +388,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			systemPrompt = composePrompt(mode);
 		},
 		setSession(id) {
+			if (id !== activeSessionId) browserSticky = false;
 			activeSessionId = id;
 		},
 		allowExecAlways() {
@@ -451,10 +502,17 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				return undefined;
 			}
 			const policy = options.approvalPolicy ?? config.tools.exec.approval;
+			const decisions: ResolvedDecisions | undefined =
+				options.provider && options.decisions !== true
+					? undefined
+					: resolveDecisions(config, apiKey, or.baseUrl, process.env, options.decisionsFetch);
 			const approval: ApprovalGate = createExecApprovalGate({
 				policy,
 				alwaysAllow,
 				emit,
+				assist: decisions?.approvals
+					? (req) => classifyToolApproval(decisions, req, message, turnOptions?.signal)
+					: undefined,
 				resolveUploadEdit: (path) => matchUploadEdit(cwd, path),
 				ask: async (req) => {
 					if (turnOptions?.approvalAsk) return turnOptions.approvalAsk(req);
@@ -464,6 +522,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			});
 			activeEmit = emit;
 			activeApproval = approval;
+			await resolveBrowser(message);
 			const tools = baseTools();
 			if (subagentsEnabled && toolsAllowedInMode(mode, "task")) {
 				tools.push(
@@ -499,7 +558,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			const deps: RunTurnDeps = {
 				cwd,
 				name: config.name,
-				systemPrompt: systemPromptWithMemory(systemPrompt, cwd, message, memoryOn),
+				systemPrompt: [systemPromptWithMemory(systemPrompt, cwd, message, memoryOn), browserNote]
+					.filter(Boolean)
+					.join("\n\n"),
 				tools,
 				approval,
 				store,
@@ -513,6 +574,8 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				agentVersion,
 				hooks,
 				mode,
+				decisions,
+				shortcut: options.shortcut,
 			};
 			const capture: AgentEventEmitter = (event) => {
 				if (event.kind === "usage") {
@@ -538,12 +601,17 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				capture,
 				{ signal: turnOptions?.signal },
 			);
-			if (session) runtime.activeSessionId = session.id;
-			scheduleMemoryExtract(memoryOn, cwd, session, provider);
+			// Assign the variable, not the setter: a new chat's first turn must keep the browser on.
+			if (session) activeSessionId = session.id;
+			scheduleMemoryExtract(memoryOn, cwd, session, provider, decisions);
 			return session;
 		},
 		close() {
 			for (const close of extraMcpClosers) close();
+			void browserStart?.then(
+				(started) => started.close(),
+				() => undefined,
+			);
 			void observability.flush();
 		},
 	};
@@ -567,7 +635,14 @@ function scheduleMemoryExtract(
 	cwd: string,
 	session: Session | undefined,
 	provider: MainModelProvider,
+	decisions?: ResolvedDecisions,
 ): void {
 	if (!enabled || !session) return;
-	void extractMemories({ cwd, session, provider }).catch(() => undefined);
+	void (async () => {
+		if (decisions?.memory) {
+			const source = turnMemorySource(session);
+			if (!source.trim() || !(await turnHasDurableFact(decisions, source))) return;
+		}
+		await extractMemories({ cwd, session, provider });
+	})().catch(() => undefined);
 }

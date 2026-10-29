@@ -67,6 +67,11 @@ export interface ExecApprovalGateDeps {
 	resolveUploadEdit?: (
 		path: string,
 	) => { rel: string; sourcePath: string; name: string } | undefined;
+	/**
+	 * Runs only where the gate would otherwise ask the user. It can answer "allow" to skip the
+	 * prompt and can never deny. Must not throw; a throw or "ask" falls through to the prompt.
+	 */
+	assist?: (req: ApprovalRequest) => Promise<"allow" | "ask">;
 }
 
 async function promptAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Promise<boolean> {
@@ -78,6 +83,17 @@ async function promptAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Prom
 	});
 	if (!deps.ask) return false;
 	return deps.ask(req);
+}
+
+async function assistedAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Promise<boolean> {
+	if (deps.assist) {
+		try {
+			if ((await deps.assist(req)) === "allow") return true;
+		} catch {
+			// fall through to the prompt
+		}
+	}
+	return promptAsk(deps, req);
 }
 
 export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate {
@@ -98,7 +114,7 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 				if (always.has("write_file") || always.has("edit_file") || always.has(req.toolName)) {
 					return true;
 				}
-				if (deps.policy === "prompt" && deps.ask) return promptAsk(deps, req);
+				if (deps.policy === "prompt" && deps.ask) return assistedAsk(deps, req);
 				return true;
 			}
 			if (!isRiskyToolCall(req.toolName)) return true;
@@ -108,7 +124,7 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 			if (deps.policy === "auto") {
 				return !isLikelyDestructive(command);
 			}
-			return promptAsk(deps, req);
+			return assistedAsk(deps, req);
 		},
 	};
 }
