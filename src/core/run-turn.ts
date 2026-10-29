@@ -1,3 +1,5 @@
+import type { ResolvedDecisions } from "../decisions/config.ts";
+import type { ShortcutPlanner } from "../decisions/shortcuts.ts";
 import { noopObservability } from "../observability/noop.ts";
 import { sanitize } from "../observability/sanitize.ts";
 import type { Observability } from "../observability/types.ts";
@@ -60,6 +62,10 @@ export interface RunTurnDeps {
 	userId?: string;
 	hooks?: HookRunner;
 	mode?: AgentMode;
+	/** Decision-model settings. When set, hosts may answer simple messages with one tool call. */
+	decisions?: ResolvedDecisions;
+	/** Host judgment of which messages are a direct tool call. Needs `decisions`. */
+	shortcut?: ShortcutPlanner;
 }
 
 export async function runTurn(
@@ -173,6 +179,40 @@ export async function runTurn(
 				guardTool(def, deps.approval, capture, obs, deps.hooks),
 			);
 
+			if (session && req.editUserTurn === undefined && deps.shortcut && deps.decisions?.shortcuts) {
+				const outcome = await tryShortcut(deps, req.message, toolDefs, tools, options.signal);
+				if (outcome?.kind === "answered") {
+					capture({ kind: "text_delta", text: outcome.reply });
+					await persistChain;
+					try {
+						session = await finalize(deps, session, assistantText, thoughtText);
+					} catch (err) {
+						capture({ kind: "error", message: errorMessage(err) });
+						root.update({
+							level: "ERROR",
+							statusMessage: errorMessage(err),
+							metadata: { status: "failed", generation_duration: Date.now() - startedAt },
+						});
+						await obs.flush();
+						return session;
+					}
+					capture({ kind: "completion" });
+					root.update({
+						output: assistantText,
+						metadata: {
+							status: "success",
+							generation_duration: Date.now() - startedAt,
+							decision: "shortcut",
+						},
+					});
+					await obs.flush();
+					return session;
+				}
+				if (outcome?.kind === "continue" && outcome.agentNote) {
+					systemPrompt += `\n\n${outcome.agentNote}`;
+				}
+			}
+
 			let agent: ConstructedAgent;
 			const provider =
 				req.model && deps.resolveProvider ? deps.resolveProvider(req.model) : deps.provider;
@@ -265,6 +305,43 @@ export async function runTurn(
 			return session;
 		},
 	);
+}
+
+type ShortcutOutcome =
+	| { kind: "answered"; reply: string }
+	| { kind: "continue"; agentNote?: string };
+
+/**
+ * Run the host's shortcut plan as one ordinary guarded tool call, so approval, hooks, tracing,
+ * and tool events behave exactly as they do for the model. Any failure returns undefined and the
+ * agent answers normally.
+ */
+async function tryShortcut(
+	deps: RunTurnDeps,
+	message: string,
+	toolDefs: McpToolDefinition[],
+	tools: AgentTool[],
+	signal?: AbortSignal,
+): Promise<ShortcutOutcome | undefined> {
+	const { decisions, shortcut } = deps;
+	if (!decisions || !shortcut) return undefined;
+	try {
+		const plan = await shortcut({
+			message,
+			toolNames: new Set(toolDefs.map((def) => def.name)),
+			decisions,
+			signal,
+		});
+		if (!plan) return undefined;
+		const tool = tools.find((candidate) => candidate.name === plan.toolName);
+		if (!tool) return undefined;
+		const result = await tool.invoke(plan.input);
+		if (result.isError) return undefined;
+		if (plan.continueWithAgent) return { kind: "continue", agentNote: plan.agentNote };
+		return { kind: "answered", reply: plan.reply };
+	} catch {
+		return undefined;
+	}
 }
 
 async function finalize(

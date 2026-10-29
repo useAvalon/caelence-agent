@@ -21,7 +21,12 @@ export interface StdioMcpClientOptions {
 	env?: Record<string, string>;
 	cwd?: string;
 	namePrefix?: string;
+	/** How long to wait for initialize + tools/list. Default 12s. */
+	initTimeoutMs?: number;
 }
+
+const STDERR_TAIL_BYTES = 2000;
+const STDERR_DRAIN_MS = 250;
 
 /**
  * Spawn an extra MCP server over newline JSON-RPC and expose its tools
@@ -70,6 +75,37 @@ export async function loadStdioMcpTools(
 		else waiter.resolve(msg.result);
 	};
 
+	// Drain stderr so a chatty server cannot fill the pipe and stall. Keep a short tail for errors.
+	let stderrTail = "";
+	const stderr = proc.stderr;
+	let stderrDrained: Promise<void> = Promise.resolve();
+	if (stderr && typeof stderr !== "number") {
+		stderrDrained = (async () => {
+			const reader = stderr.getReader();
+			const decoder = new TextDecoder();
+			try {
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					stderrTail = (stderrTail + decoder.decode(value, { stream: true })).slice(
+						-STDERR_TAIL_BYTES,
+					);
+				}
+			} catch {
+				// process went away
+			}
+		})();
+	}
+	const withStderr = async (err: Error): Promise<Error> => {
+		// A server that prints and exits may not have been read yet. Wait briefly, never long.
+		await Promise.race([
+			stderrDrained,
+			new Promise<void>((done) => setTimeout(done, STDERR_DRAIN_MS)),
+		]);
+		const tail = stderrTail.trim();
+		return tail ? new Error(`${err.message}\n${tail}`) : err;
+	};
+
 	const stdout = proc.stdout;
 	if (stdout && typeof stdout !== "number") {
 		(async () => {
@@ -108,6 +144,13 @@ export async function loadStdioMcpTools(
 		});
 	};
 
+	/** JSON-RPC notification: no id, no reply. */
+	const notify = (method: string): void => {
+		const stdin = proc.stdin;
+		if (closed || !stdin || typeof stdin === "number") return;
+		stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method })}\n`);
+	};
+
 	const close = (): void => {
 		closed = true;
 		failAll(new Error("MCP process closed"));
@@ -118,7 +161,7 @@ export async function loadStdioMcpTools(
 		}
 	};
 
-	const initMs = 12_000;
+	const initMs = options.initTimeoutMs ?? 12_000;
 	let listed: {
 		tools?: Array<{
 			name: string;
@@ -136,7 +179,7 @@ export async function loadStdioMcpTools(
 					capabilities: {},
 					clientInfo: { name: "caelence-harness", version: "0.1.0" },
 				});
-				await rpc("notifications/initialized").catch(() => undefined);
+				notify("notifications/initialized");
 				return rpc("tools/list");
 			})(),
 			new Promise<never>((_, reject) => {
@@ -155,7 +198,7 @@ export async function loadStdioMcpTools(
 		};
 	} catch (err) {
 		close();
-		throw err;
+		throw await withStderr(err instanceof Error ? err : new Error(String(err)));
 	} finally {
 		if (timer) clearTimeout(timer);
 	}
@@ -171,7 +214,7 @@ export async function loadStdioMcpTools(
 		async handler(input) {
 			try {
 				const result = (await rpc("tools/call", { name: t.name, arguments: input })) as ToolResult;
-				if (result && Array.isArray(result.content)) return result;
+				if (result && Array.isArray(result.content)) return textOnlyResult(result);
 				if (result && typeof result === "object")
 					return jsonResult(result as unknown as Record<string, unknown>);
 				return textResult(String(result ?? ""));
@@ -182,4 +225,21 @@ export async function loadStdioMcpTools(
 	}));
 
 	return { tools, close };
+}
+
+/**
+ * The harness only carries text tool results. Replace image, audio, and resource blocks
+ * with a short placeholder so the model never sees `undefined`.
+ */
+export function textOnlyResult(result: ToolResult): ToolResult {
+	const blocks = (result.content as unknown[]).map((block) => {
+		const b = block as { type?: string; text?: unknown; mimeType?: string; mime_type?: string };
+		if (b && b.type === "text" && typeof b.text === "string") {
+			return { type: "text" as const, text: b.text };
+		}
+		const kind = typeof b?.type === "string" ? b.type : "content";
+		const mime = b?.mimeType ?? b?.mime_type;
+		return { type: "text" as const, text: `[${kind}${mime ? ` ${mime}` : ""} omitted]` };
+	});
+	return { ...result, content: blocks };
 }

@@ -1,3 +1,4 @@
+export type { BrowserConfig } from "./browser/browser-use.ts";
 export {
 	CAELENCE_THEME,
 	PLAIN_THEME,
@@ -26,6 +27,7 @@ export {
 export type { AgentEvent, AgentEventEmitter, MainModelProvider } from "./core/events.ts";
 export { isTerminalAgentEvent } from "./core/events.ts";
 export { createHookRunner, type HookConfig, type HookRunner } from "./core/hooks.ts";
+export { newId } from "./core/ids.ts";
 export {
 	type InstructionLayers,
 	loadInstructionLayers,
@@ -42,6 +44,7 @@ export {
 	READ_ONLY_ANNOTATIONS,
 	resolveToolAnnotations,
 	textResult,
+	toolResultText,
 	UNKNOWN_TOOL_ANNOTATIONS,
 } from "./core/mcp.ts";
 export {
@@ -68,6 +71,25 @@ export {
 	titleFromUserMessage,
 } from "./core/session.ts";
 export { addUsage, formatUsage, parseTokenUsage, type TokenUsage } from "./core/usage.ts";
+export { type ApprovalVerdict, classifyToolApproval } from "./decisions/approval.ts";
+export {
+	type ChoiceAnswer,
+	clipState,
+	DEFAULT_JEV_MODEL,
+	type DecisionsResponse,
+	decisionsUrl,
+	readChoiceAnswer,
+	readNoulAnswer,
+	submitDecisions,
+} from "./decisions/client.ts";
+export {
+	decide,
+	type HarnessDecisionsConfig,
+	type ResolvedDecisions,
+	resolveDecisions,
+} from "./decisions/config.ts";
+export { turnHasDurableFact } from "./decisions/memory.ts";
+export type { ShortcutContext, ShortcutPlan, ShortcutPlanner } from "./decisions/shortcuts.ts";
 export {
 	type ChatFn,
 	createOpenRouterChat,
