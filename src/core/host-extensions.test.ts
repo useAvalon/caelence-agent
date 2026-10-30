@@ -535,3 +535,71 @@ describe("browser turn option", () => {
 		}
 	});
 });
+
+describe("own-Chrome backend restarts after the browser becomes ready", () => {
+	test("a failed attach is retried on the next turn with a fresh server", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "host-restart-"));
+		const starts: number[] = [];
+		const closes: number[] = [];
+		let ready = false;
+		const seen = { tools: [] as string[] };
+		const harness = await createHarness({
+			cwd,
+			config: { ...DEFAULT_CONFIG, browser: { backend: "chrome", app: "arc" } },
+			provider,
+			observability: noopObservability,
+			constructAgent: (input) => {
+				seen.tools = input.tools.map((t) => t.name);
+				return {
+					async run() {
+						// The agent's first browser action each turn.
+						await input.tools
+							.find((t) => t.name === "browser__browser_tabs")
+							?.invoke({ action: "list" });
+					},
+				};
+			},
+			browserLoader: async () => {
+				const id = starts.length;
+				starts.push(id);
+				const isReady = ready;
+				return {
+					tools: [
+						{
+							name: "browser__browser_tabs",
+							description: "tabs",
+							inputSchema: { type: "object", properties: {} },
+							annotations: UNKNOWN_TOOL_ANNOTATIONS,
+							async handler() {
+								return isReady
+									? textResult("### Result - 0: (current) [](about:blank)")
+									: textResult(
+											"Error: Could not connect to chrome: DevToolsActivePort file not found",
+											true,
+										);
+							},
+						},
+					],
+					close: () => {
+						closes.push(id);
+					},
+				};
+			},
+		});
+		try {
+			await harness.runTurn("@browser go", () => undefined);
+			expect(starts).toHaveLength(1);
+			// The user turns the switch on. The next turn must not reuse the dead server.
+			ready = true;
+			await harness.runTurn("done, try again", () => undefined);
+			expect(starts).toHaveLength(2);
+			expect(closes).toEqual([0]);
+			// Healthy now: a third turn reuses the second server.
+			await harness.runTurn("and again", () => undefined);
+			expect(starts).toHaveLength(2);
+		} finally {
+			harness.close();
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+});

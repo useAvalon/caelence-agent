@@ -68,6 +68,13 @@ export interface McpToolDefinition {
 	inputSchema: Record<string, unknown>;
 	annotations: McpToolAnnotations;
 	handler(input: Record<string, unknown>): Promise<ToolResult>;
+	/**
+	 * Return a short, plain reason when this particular call needs the user's approval, or nothing
+	 * when it can run. Unlike a tool that is always risky, this decides per call. An approval the
+	 * user gives for one call never covers the next, and "always allow" and host auto-approve
+	 * modes do not skip it.
+	 */
+	confirm?(input: Record<string, unknown>): string | undefined;
 }
 
 export interface McpToolSet {

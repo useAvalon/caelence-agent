@@ -6,6 +6,8 @@ export interface ApprovalRequest {
 	callId: string;
 	toolName: string;
 	input: Record<string, unknown>;
+	/** Why the tool asked for approval, in words the user can act on. Set by `confirm`. */
+	reason?: string;
 }
 
 export interface ApprovalGate {
@@ -87,6 +89,7 @@ async function promptAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Prom
 		callId: req.callId,
 		toolName: req.toolName,
 		input: req.input,
+		...(req.reason ? { reason: req.reason } : {}),
 	});
 	if (!deps.ask) return false;
 	return deps.ask(req);
@@ -107,6 +110,12 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 	const always = deps.alwaysAllow ?? new Set<string>();
 	return {
 		async request(req) {
+			// A tool asked for a human on this call. Nothing else may answer for the user: not
+			// promptOnly, "always allow", the auto policy, or the decision-model assist.
+			if (req.reason) {
+				if (deps.policy === "deny") return false;
+				return promptAsk(deps, req);
+			}
 			if (deps.promptOnly && !deps.promptOnly(req)) return true;
 			if (isFileWriteTool(req.toolName) && deps.resolveUploadEdit) {
 				const path = typeof req.input.path === "string" ? req.input.path : "";

@@ -198,14 +198,12 @@ The model is pinned because probabilities shift between releases. If you change 
 
 ## Browser
 
-The agent can drive a real Chrome window through [browser-use](https://docs.browser-use.com/open-source/introduction). It is off until you ask for it. Put `@browser` in a message and the browser tools are available for the rest of that chat, for example `@browser find the pricing page on example.com`.
+The agent can drive Chrome. It is off until you ask for it. Put `@browser` in a message and the browser tools are available for the rest of that chat, for example `@browser find the pricing page on example.com`. It only runs in `agent` mode.
 
-It needs [`uv`](https://docs.astral.sh/uv/) on your `PATH`. The first use downloads browser-use (about 100 Python packages) and can take a minute. Later starts take a few seconds, and the server only starts when you first use it.
-
-To change the default, set `browser` in `harness.config.ts`:
+There are two ways to run it. Set `browser` in `harness.config.ts`:
 
 ```ts
-browser: { enabled: true, headless: false },
+browser: { enabled: true, backend: "separate" },
 ```
 
 | Setting | Effect |
@@ -213,11 +211,28 @@ browser: { enabled: true, headless: false },
 | `enabled` unset | On for chats where a message contains `@browser` |
 | `enabled: true` | Always available, no mention needed |
 | `enabled: false` | Never available, `@browser` is ignored |
-| `headless: true` | Run Chrome without a window. Default is a visible window |
+| `backend: "separate"` | The default. Its own signed-out Chrome, through browser-use |
+| `backend: "chrome"` | Your own Chrome, where you are already signed in, through Playwright MCP |
+| `headless: true` | Separate backend only. Run Chrome without a window |
 
-The tools are `browser_navigate`, `browser_get_state`, `browser_click`, `browser_type`, `browser_scroll`, `browser_get_html`, `browser_go_back`, and tab and session management. The agent reads the page as a list of numbered elements and clicks by number. They only run in `agent` mode.
+### Separate Chrome (default)
 
-browser-use uses its own Chrome profile in `~/.config/browseruse/profiles/default`, so it does not see your everyday Chrome sign-ins. Sign in once in that window and it stays. Telemetry and cloud sync are switched off. `browser_extract_content`, `browser_screenshot`, and browser-use's own sub-agent are not exposed, because they need a separate OpenAI key or return images. The agent is told to ask before buying, sending, posting, or deleting, but browser tool calls are not gated by an approval prompt the way `exec` is.
+Runs [browser-use](https://docs.browser-use.com/open-source/introduction). It needs [`uv`](https://docs.astral.sh/uv/). The first use downloads browser-use (about 100 Python packages) and can take a minute, and later starts take a few seconds. It starts when you first use it, and finds `uv` even when the app was launched from the Dock.
+
+It uses its own Chrome profile in `~/.config/browseruse/profiles/default`, so it does not see your everyday sign-ins. Sign in once in that window and it stays. Telemetry and cloud sync are switched off. `browser_extract_content`, `browser_screenshot`, and browser-use's own sub-agent are not exposed, because they need a separate OpenAI key or return images. The tools are not gated by an approval prompt, so the agent is only told to ask before buying, sending, posting, or deleting.
+
+### Your own Chrome
+
+Attaches to the Chrome you have open, with your logins, through [Playwright MCP](https://playwright.dev/mcp/configuration/browser-extension). It needs Node.js. Chrome has not allowed attaching to your normal profile through a debug port since version 136, so you turn on the supported switch once: open `chrome://inspect/#remote-debugging` in Chrome, tick **Allow remote debugging for this browser instance**, and approve the permission Chrome shows. Until you do, the agent gets those steps and passes them on.
+
+Because the agent acts as you on every site you are signed in to, this backend is stricter:
+
+- It attaches to the browser named by `browser.app`: `chrome` (default), `edge`, `arc`, `brave`, or `chromium`. It never falls back to a different one, so it cannot end up in a browser you did not choose. If that browser is not set up, the agent is told to say so, and the next turn tries again.
+- It gets 13 page tools. JavaScript execution, file upload, and network inspection are not offered.
+- It works only in a tab it opens itself. Closing and switching your tabs is refused, and so is navigating before it has its own tab, because navigation replaces the tab you are looking at.
+- You are asked before it opens a site you did not name, clicks a button that commits something (post, send, buy, delete, and the Danish equivalents), accepts a dialog, or clicks any button after typing. The last one does not depend on the button's wording. An approval covers one action, and "always allow" and a host's auto-approve mode do not skip it.
+
+These checks stand in front of a model. They are not a security boundary, and a page can still try to talk the agent into something. Playwright is pinned to 0.0.83.
 
 ## Memory
 
