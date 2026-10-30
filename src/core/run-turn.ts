@@ -35,11 +35,37 @@ import type { AgentTool, ConstructAgent, ConstructedAgent } from "./strands.ts";
 const REJECTED_TOOL_MESSAGE = "was denied approval and was not invoked";
 
 export interface TurnRequest {
+	/** What the model sees as the user's message. */
 	message: string;
 	sessionId?: string;
 	model?: string;
 	editUserTurn?: number;
+	/**
+	 * What the transcript stores and titles the chat with, when it differs from `message`. A host
+	 * can prefix instructions to `message` for the model without them showing up in the chat.
+	 */
+	displayMessage?: string;
+	/** Appended to the system prompt for this turn only. */
+	systemAppend?: string;
+	/** Tool names hidden from the model for this turn only. */
+	excludeTools?: readonly string[];
 }
+
+/** What a host `intercept` hook can do with a turn. */
+export interface TurnInterceptContext {
+	message: string;
+	history: Array<{ role: "user" | "assistant"; content: string }>;
+	toolNames: ReadonlySet<string>;
+	emit: AgentEventEmitter;
+	signal?: AbortSignal;
+}
+
+/**
+ * Handle a whole turn without the chat model, for example a computer-use agent. Return a reply
+ * to end the turn with it, or undefined to let the normal agent answer. Text sent through
+ * `emit` is part of the reply. Throwing falls through to the normal agent.
+ */
+export type TurnInterceptor = (ctx: TurnInterceptContext) => Promise<{ reply: string } | undefined>;
 
 export interface RunTurnDeps {
 	cwd: string;
@@ -66,6 +92,8 @@ export interface RunTurnDeps {
 	decisions?: ResolvedDecisions;
 	/** Host judgment of which messages are a direct tool call. Needs `decisions`. */
 	shortcut?: ShortcutPlanner;
+	/** Host handler that can answer a whole turn without the chat model. */
+	intercept?: TurnInterceptor;
 }
 
 export async function runTurn(
@@ -75,20 +103,21 @@ export async function runTurn(
 	options: { signal?: AbortSignal } = {},
 ): Promise<Session | undefined> {
 	let session: Session | undefined;
+	const stored = req.displayMessage ?? req.message;
 	try {
 		if (req.sessionId) session = await deps.store.get(req.sessionId);
 		if (req.editUserTurn !== undefined) {
 			if (!session) throw new Error("No session to edit.");
-			session = await deps.store.save(replaceUserTurn(session, req.editUserTurn, req.message));
+			session = await deps.store.save(replaceUserTurn(session, req.editUserTurn, stored));
 		} else {
 			session ??= await deps.store.create(deps.systemPrompt, req.model);
 			session = await deps.store.append(session, {
 				kind: "turn",
 				role: "user",
-				content: req.message,
+				content: stored,
 			});
 			if (!session.title || session.title === "New chat") {
-				session = await deps.store.setTitle(session, titleFromUserMessage(req.message));
+				session = await deps.store.setTitle(session, titleFromUserMessage(stored));
 			}
 		}
 		emit({ kind: "session_meta", sessionId: session.id, title: session.title });
@@ -174,39 +203,78 @@ export async function runTurn(
 				}
 			}
 
-			const toolDefs = deps.mcp ? deps.mcp.listTools() : deps.tools;
+			const appended = req.systemAppend?.trim();
+			if (appended) systemPrompt += `\n\n${appended}`;
+			const allDefs = deps.mcp ? deps.mcp.listTools() : deps.tools;
+			const hidden = new Set(req.excludeTools ?? []);
+			const toolDefs = hidden.size > 0 ? allDefs.filter((def) => !hidden.has(def.name)) : allDefs;
 			const tools: AgentTool[] = toolDefs.map((def) =>
 				guardTool(def, deps.approval, capture, obs, deps.hooks),
 			);
 
-			if (session && req.editUserTurn === undefined && deps.shortcut && deps.decisions?.shortcuts) {
-				const outcome = await tryShortcut(deps, req.message, toolDefs, tools, options.signal);
-				if (outcome?.kind === "answered") {
-					capture({ kind: "text_delta", text: outcome.reply });
-					await persistChain;
-					try {
-						session = await finalize(deps, session, assistantText, thoughtText);
-					} catch (err) {
-						capture({ kind: "error", message: errorMessage(err) });
-						root.update({
-							level: "ERROR",
-							statusMessage: errorMessage(err),
-							metadata: { status: "failed", generation_duration: Date.now() - startedAt },
-						});
-						await obs.flush();
-						return session;
-					}
-					capture({ kind: "completion" });
+			// End the turn with a reply the chat model did not write. A storage failure while saving it
+			// ends the turn with an error instead of rejecting out of the trace callback.
+			const finishWithReply = async (decision: string): Promise<Session | undefined> => {
+				await persistChain;
+				try {
+					if (session) session = await finalize(deps, session, assistantText, thoughtText);
+				} catch (err) {
+					capture({ kind: "error", message: errorMessage(err) });
 					root.update({
-						output: assistantText,
-						metadata: {
-							status: "success",
-							generation_duration: Date.now() - startedAt,
-							decision: "shortcut",
-						},
+						level: "ERROR",
+						statusMessage: errorMessage(err),
+						metadata: { status: "failed", generation_duration: Date.now() - startedAt },
 					});
 					await obs.flush();
 					return session;
+				}
+				capture({ kind: "completion" });
+				root.update({
+					output: assistantText,
+					metadata: { status: "success", generation_duration: Date.now() - startedAt, decision },
+				});
+				await obs.flush();
+				return session;
+			};
+
+			if (session && req.editUserTurn === undefined && deps.intercept) {
+				const outcome = await tryIntercept(
+					deps.intercept,
+					{
+						message: req.message,
+						history,
+						toolNames: new Set(toolDefs.map((def) => def.name)),
+						emit: capture,
+						signal: options.signal,
+					},
+					() => assistantText.length > 0,
+				);
+				if (outcome.kind === "reply") {
+					if (!assistantText) capture({ kind: "text_delta", text: outcome.reply });
+					return finishWithReply("intercept");
+				}
+				if (outcome.kind === "failed") {
+					await persistChain;
+					if (session)
+						session = await finalize(deps, session, assistantText, thoughtText).catch(
+							() => session,
+						);
+					capture({ kind: "error", message: errorMessage(outcome.error) });
+					root.update({
+						level: "ERROR",
+						statusMessage: errorMessage(outcome.error),
+						metadata: { status: "failed", generation_duration: Date.now() - startedAt },
+					});
+					await obs.flush();
+					return session;
+				}
+			}
+
+			if (session && req.editUserTurn === undefined && deps.shortcut && deps.decisions?.shortcuts) {
+				const outcome = await tryShortcut(deps, stored, toolDefs, tools, options.signal);
+				if (outcome?.kind === "answered") {
+					capture({ kind: "text_delta", text: outcome.reply });
+					return finishWithReply("shortcut");
 				}
 				if (outcome?.kind === "continue" && outcome.agentNote) {
 					systemPrompt += `\n\n${outcome.agentNote}`;
@@ -305,6 +373,29 @@ export async function runTurn(
 			return session;
 		},
 	);
+}
+
+type InterceptOutcome =
+	| { kind: "reply"; reply: string }
+	| { kind: "pass" }
+	| { kind: "failed"; error: unknown };
+
+/**
+ * Run the host interceptor. A throw before it produced any output passes the turn to the normal
+ * agent. A throw after output has already reached the user is a failure, because answering again
+ * would show two answers glued together.
+ */
+async function tryIntercept(
+	intercept: TurnInterceptor,
+	ctx: TurnInterceptContext,
+	producedOutput: () => boolean,
+): Promise<InterceptOutcome> {
+	try {
+		const result = await intercept(ctx);
+		return result ? { kind: "reply", reply: result.reply } : { kind: "pass" };
+	} catch (err) {
+		return producedOutput() ? { kind: "failed", error: err } : { kind: "pass" };
+	}
 }
 
 type ShortcutOutcome =

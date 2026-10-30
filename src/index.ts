@@ -11,8 +11,10 @@ export {
 	DEFAULT_CONFIG,
 	DEFAULT_MODEL,
 	loadConfig,
+	OPENROUTER_DEFAULT_BASE_URL,
 	resolveConfigPath,
 	resolveOpenRouter,
+	stripTrailingSlashes,
 } from "./config.ts";
 export {
 	type ApprovalGate,
@@ -24,7 +26,13 @@ export {
 	isUploadEditRequest,
 	parseExecApprovalPolicy,
 } from "./core/approval.ts";
-export type { AgentEvent, AgentEventEmitter, MainModelProvider } from "./core/events.ts";
+export { errorMessage } from "./core/errors.ts";
+export type {
+	AgentEvent,
+	AgentEventEmitter,
+	MainModelProvider,
+	ProviderStreamEvent,
+} from "./core/events.ts";
 export { isTerminalAgentEvent } from "./core/events.ts";
 export { createHookRunner, type HookConfig, type HookRunner } from "./core/hooks.ts";
 export { newId } from "./core/ids.ts";
@@ -55,7 +63,14 @@ export {
 	toolsAllowedInMode,
 	tryParseAgentMode,
 } from "./core/mode.ts";
-export { buildSystemPrompt, type RunTurnDeps, runTurn, type TurnRequest } from "./core/run-turn.ts";
+export {
+	buildSystemPrompt,
+	type RunTurnDeps,
+	runTurn,
+	type TurnInterceptContext,
+	type TurnInterceptor,
+	type TurnRequest,
+} from "./core/run-turn.ts";
 export {
 	createFileSessionStore,
 	createMemorySessionStore,
@@ -70,6 +85,7 @@ export {
 	sessionTranscript,
 	titleFromUserMessage,
 } from "./core/session.ts";
+export type { AgentTool, ConstructAgent, ConstructedAgent } from "./core/strands.ts";
 export { addUsage, formatUsage, parseTokenUsage, type TokenUsage } from "./core/usage.ts";
 export { type ApprovalVerdict, classifyToolApproval } from "./decisions/approval.ts";
 export {
@@ -91,6 +107,13 @@ export {
 export { turnHasDurableFact } from "./decisions/memory.ts";
 export type { ShortcutContext, ShortcutPlan, ShortcutPlanner } from "./decisions/shortcuts.ts";
 export {
+	type BridgeReady,
+	type DesktopState,
+	type StartDesktopBridgeOptions,
+	startDesktopBridge,
+} from "./desktop/bridge.ts";
+export type { BridgeHost, BridgeHostContext, BridgeTurnPlan } from "./desktop/host.ts";
+export {
 	type ChatFn,
 	createOpenRouterChat,
 	discoverEvalSuite,
@@ -102,6 +125,11 @@ export {
 	runNamedEval,
 } from "./evals/runner.ts";
 export { initHost } from "./init.ts";
+export { listedMcpCatalog, type McpCatalogEntry } from "./integrations/catalog.ts";
+export { connectMcp } from "./integrations/connect.ts";
+export { withOAuthLoopback } from "./integrations/loopback.ts";
+export { openRemoteMcp } from "./integrations/remote-mcp.ts";
+export { listStoredConnections } from "./integrations/store.ts";
 export { extractMemories, parseExtractedFacts } from "./memory/extract.ts";
 export { isMemoryEnabled, readMemoryPrefs, writeMemoryPrefs } from "./memory/prefs.ts";
 export { formatMemoryList, formatRetrievedMemory } from "./memory/prompt.ts";
@@ -131,7 +159,12 @@ export {
 	WEBSITE_GENERATION_REGRESSION,
 } from "./observability/index.ts";
 export { CLI_NAME, PRODUCT_NAME } from "./product.ts";
-export { type CreateHarnessOptions, createHarness, type HarnessRuntime } from "./runtime.ts";
+export {
+	type CreateHarnessOptions,
+	createHarness,
+	type HarnessRuntime,
+	type HarnessTurnOptions,
+} from "./runtime.ts";
 export { authorSkillMarkdown, SKILL_AUTHOR_SYSTEM } from "./skills/author-skill.ts";
 export {
 	browseSkillCatalog,

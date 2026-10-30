@@ -32,6 +32,7 @@ import {
 	defaultSummarizer,
 	type RunTurnDeps,
 	runTurn,
+	type TurnInterceptor,
 } from "./core/run-turn.ts";
 import {
 	createFileSessionStore,
@@ -95,6 +96,27 @@ import { createReadSkillTool } from "./tools/read-skill.ts";
 import { createTaskTool } from "./tools/subagent.ts";
 import { createMemoryTodoStore, createTodoTool } from "./tools/todo.ts";
 
+/** Per-turn options a host can pass to `runTurn`. */
+export interface HarnessTurnOptions {
+	signal?: AbortSignal;
+	approvalAsk?: (req: ApprovalRequest) => Promise<boolean>;
+	editUserTurn?: number;
+	/**
+	 * What the chat shows and stores, and what decisions and `@browser` read, when it differs from
+	 * the `message` the model sees. Lets a host prefix instructions without them reaching the chat.
+	 */
+	displayMessage?: string;
+	/** Appended to the system prompt for this turn only. */
+	systemAppend?: string;
+	/** Tool names hidden from the model for this turn only. */
+	excludeTools?: readonly string[];
+	/**
+	 * Ask the user only about requests this returns true for. Every other tool call runs without a
+	 * prompt. The `deny` policy and the host denylist still apply to the calls it lets through.
+	 */
+	promptOnly?: (req: ApprovalRequest) => boolean;
+}
+
 export interface HarnessRuntime {
 	cwd: string;
 	config: HarnessConfig;
@@ -111,11 +133,7 @@ export interface HarnessRuntime {
 	runTurn(
 		message: string,
 		emit: AgentEventEmitter,
-		options?: {
-			signal?: AbortSignal;
-			approvalAsk?: (req: ApprovalRequest) => Promise<boolean>;
-			editUserTurn?: number;
-		},
+		options?: HarnessTurnOptions,
 	): Promise<Session | undefined>;
 	setModel(modelId: string): void;
 	setMode(mode: AgentMode): void;
@@ -161,6 +179,10 @@ export interface CreateHarnessOptions {
 	decisions?: boolean;
 	/** Host judgment of which messages are one direct tool call. See ShortcutPlanner. */
 	shortcut?: ShortcutPlanner;
+	/** Host handler that can answer a whole turn without the chat model. See TurnInterceptor. */
+	intercept?: TurnInterceptor;
+	/** Appended to the system prompt on every turn, for example a host persona. */
+	systemAppend?: string;
 	/** Replaces fetch for decision calls. Tests only. */
 	decisionsFetch?: FetchImpl;
 }
@@ -191,8 +213,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	let skills = loadActiveSkills();
 	const layers = loadInstructionLayers({ cwd, projectFile: config.instructionsFile });
 	let mode = parseAgentMode(options.mode ?? config.mode);
-	const composePrompt = (nextMode: AgentMode) =>
-		buildSystemPrompt({
+	const hostAppend = options.systemAppend?.trim();
+	const composePrompt = (nextMode: AgentMode) => {
+		const base = buildSystemPrompt({
 			name: config.name,
 			cwd,
 			userInstructions: layers.user,
@@ -200,6 +223,8 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			skillCatalog: skillCatalogPrompt(skills),
 			mode: nextMode,
 		});
+		return hostAppend ? `${base}\n\n${hostAppend}` : base;
+	};
 	let systemPrompt = composePrompt(mode);
 	const store = createFileSessionStore(cwd);
 	const local = createLocalTools({
@@ -502,6 +527,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				return undefined;
 			}
 			const policy = options.approvalPolicy ?? config.tools.exec.approval;
+			const userText = turnOptions?.displayMessage ?? message;
 			const decisions: ResolvedDecisions | undefined =
 				options.provider && options.decisions !== true
 					? undefined
@@ -511,9 +537,10 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				alwaysAllow,
 				emit,
 				assist: decisions?.approvals
-					? (req) => classifyToolApproval(decisions, req, message, turnOptions?.signal)
+					? (req) => classifyToolApproval(decisions, req, userText, turnOptions?.signal)
 					: undefined,
 				resolveUploadEdit: (path) => matchUploadEdit(cwd, path),
+				promptOnly: turnOptions?.promptOnly,
 				ask: async (req) => {
 					if (turnOptions?.approvalAsk) return turnOptions.approvalAsk(req);
 					if (policy === "prompt") return false;
@@ -522,7 +549,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			});
 			activeEmit = emit;
 			activeApproval = approval;
-			await resolveBrowser(message);
+			await resolveBrowser(userText);
 			const tools = baseTools();
 			if (subagentsEnabled && toolsAllowedInMode(mode, "task")) {
 				tools.push(
@@ -558,7 +585,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			const deps: RunTurnDeps = {
 				cwd,
 				name: config.name,
-				systemPrompt: [systemPromptWithMemory(systemPrompt, cwd, message, memoryOn), browserNote]
+				systemPrompt: [systemPromptWithMemory(systemPrompt, cwd, userText, memoryOn), browserNote]
 					.filter(Boolean)
 					.join("\n\n"),
 				tools,
@@ -576,6 +603,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				mode,
 				decisions,
 				shortcut: options.shortcut,
+				intercept: options.intercept,
 			};
 			const capture: AgentEventEmitter = (event) => {
 				if (event.kind === "usage") {
@@ -597,6 +625,11 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 					...(turnOptions?.editUserTurn !== undefined
 						? { editUserTurn: turnOptions.editUserTurn }
 						: {}),
+					...(turnOptions?.displayMessage !== undefined
+						? { displayMessage: turnOptions.displayMessage }
+						: {}),
+					...(turnOptions?.systemAppend ? { systemAppend: turnOptions.systemAppend } : {}),
+					...(turnOptions?.excludeTools?.length ? { excludeTools: turnOptions.excludeTools } : {}),
 				},
 				capture,
 				{ signal: turnOptions?.signal },
