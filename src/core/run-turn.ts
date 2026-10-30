@@ -59,9 +59,9 @@ export interface TurnInterceptContext {
 	message: string;
 	/**
 	 * A model provider for `modelId`, for hosts that run their own model calls. `title` labels the
-	 * calls in OpenRouter usage. Undefined when the harness was given a fixed test provider.
+	 * calls in OpenRouter usage. When the harness was given a fixed provider, every call returns it.
 	 */
-	provider?: (modelId: string, title?: string) => MainModelProvider;
+	provider: (modelId: string, title?: string) => MainModelProvider;
 	/** The `hostData` the host set for this turn. */
 	hostData: Record<string, unknown>;
 	history: Array<{ role: "user" | "assistant"; content: string }>;
@@ -252,7 +252,8 @@ export async function runTurn(
 					deps.intercept,
 					{
 						message: stored,
-						provider: deps.resolveProvider,
+						provider: (modelId, title) =>
+							deps.resolveProvider ? deps.resolveProvider(modelId, title) : deps.provider,
 						hostData: req.hostData ?? {},
 						history,
 						toolNames: new Set(toolDefs.map((def) => def.name)),

@@ -387,6 +387,23 @@ describe("provider factory for hosts", () => {
 		expect(calls).toEqual([["acme/model", "agent:writer"]]);
 	});
 
+	test("with a fixed provider the factory returns it for every model", async () => {
+		const s = spy();
+		let got: MainModelProvider | undefined;
+		await runTurn(
+			deps({
+				constructAgent: s.constructAgent,
+				intercept: async (ctx) => {
+					got = ctx.provider("any/model", "agent:writer");
+					return { reply: "done" };
+				},
+			}),
+			{ message: "hi" },
+			() => undefined,
+		);
+		expect(got).toBe(provider);
+	});
+
 	test("the title becomes the X-Title header on real OpenRouter calls", async () => {
 		const { constructOpenRouterProvider } = await import("./strands.ts");
 		const seenTitles: string[] = [];

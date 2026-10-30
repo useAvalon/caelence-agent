@@ -9,3 +9,5 @@ Add extension points so a host app can build on the harness instead of forking i
 - `createHarness` takes `intercept` to answer a whole turn without the chat model (for example a computer-use agent) and `systemAppend` for text on every turn. The interceptor gets the user's own words, a `provider(modelId, title)` factory for its own model calls, and the `hostData` the host set for the turn. If it fails after it has already produced output, the turn ends with an error instead of answering twice.
 - The approval gate takes `promptOnly`.
 - More exports: the helpers a host needs to build its own bridge routes.
+- The browser server now starts from an app with a bare `PATH`, such as one launched from the Dock. It finds `uvx` in `~/.local/bin`, `~/.cargo/bin`, and Homebrew when `PATH` does not have it, and asks uv for its own Python 3.11 to 3.13 instead of the system Python 3.9 that browser-use rejects.
+- The `provider` factory an interceptor receives always exists. With a fixed provider it returns that provider.
