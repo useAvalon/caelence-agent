@@ -122,3 +122,50 @@ describe("exec approval", () => {
 		expect(input.path).toBe("/tmp/note.txt");
 	});
 });
+
+describe("promptOnly", () => {
+	const deletes = (req: { input: Record<string, unknown> }) =>
+		/\brm\b/.test(String(req.input.command ?? ""));
+
+	test("requests it rejects run without asking", async () => {
+		let asked = 0;
+		const gate = createExecApprovalGate({
+			policy: "prompt",
+			ask: async () => {
+				asked += 1;
+				return false;
+			},
+			promptOnly: deletes,
+		});
+		expect(
+			await gate.request({ callId: "1", toolName: "exec", input: { command: "bun test" } }),
+		).toBe(true);
+		expect(await gate.request({ callId: "2", toolName: "write_file", input: { path: "a" } })).toBe(
+			true,
+		);
+		expect(asked).toBe(0);
+	});
+
+	test("requests it accepts still ask", async () => {
+		let asked = 0;
+		const gate = createExecApprovalGate({
+			policy: "prompt",
+			ask: async () => {
+				asked += 1;
+				return false;
+			},
+			promptOnly: deletes,
+		});
+		expect(
+			await gate.request({ callId: "3", toolName: "exec", input: { command: "rm -rf dist" } }),
+		).toBe(false);
+		expect(asked).toBe(1);
+	});
+
+	test("the deny policy still refuses what it lets through", async () => {
+		const gate = createExecApprovalGate({ policy: "deny", promptOnly: deletes });
+		expect(await gate.request({ callId: "4", toolName: "exec", input: { command: "rm x" } })).toBe(
+			false,
+		);
+	});
+});

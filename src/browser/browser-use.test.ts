@@ -3,11 +3,14 @@ import type { McpToolDefinition } from "../core/mcp.ts";
 import { READ_ONLY_ANNOTATIONS, textResult, UNKNOWN_TOOL_ANNOTATIONS } from "../core/mcp.ts";
 import {
 	adaptBrowserTools,
+	BROWSER_USE_PYTHON,
 	BROWSER_USE_SPEC,
 	browserAccess,
 	browserServerOptions,
 	browserSetupHint,
 	mentionsBrowser,
+	resolveUvx,
+	uvSearchDirs,
 } from "./browser-use.ts";
 
 function tool(name: string, reply = "ok", isError = false): McpToolDefinition {
@@ -52,9 +55,16 @@ describe("browserAccess", () => {
 
 describe("browserServerOptions", () => {
 	test("pins browser-use and turns telemetry off", () => {
-		const opts = browserServerOptions(undefined, "/tmp/x");
+		const opts = browserServerOptions(undefined, "/tmp/x", "uvx");
 		expect(opts.command).toBe("uvx");
-		expect(opts.args).toEqual(["--from", BROWSER_USE_SPEC, "browser-use", "--mcp"]);
+		expect(opts.args).toEqual([
+			"--python",
+			BROWSER_USE_PYTHON,
+			"--from",
+			BROWSER_USE_SPEC,
+			"browser-use",
+			"--mcp",
+		]);
 		expect(opts.env?.ANONYMIZED_TELEMETRY).toBe("false");
 		expect(opts.env?.BROWSER_USE_CLOUD_SYNC).toBe("false");
 		expect(opts.env).not.toHaveProperty("BROWSER_USE_HEADLESS");
@@ -127,5 +137,47 @@ describe("browserSetupHint", () => {
 			new Error(Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n")),
 		);
 		expect(hint.split("\n")).toHaveLength(6);
+	});
+});
+
+describe("resolveUvx", () => {
+	const home = "/Users/someone";
+
+	test("uses uvx from PATH when it is there", () => {
+		const exists = (path: string) => path === "/opt/tools/uvx";
+		expect(resolveUvx({ PATH: "/usr/bin:/opt/tools" }, exists, home)).toBe("/opt/tools/uvx");
+	});
+
+	test("finds uvx in the folders uv installs to when PATH is the minimal GUI one", () => {
+		const exists = (path: string) => path === `${home}/.local/bin/uvx`;
+		expect(resolveUvx({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, exists, home)).toBe(
+			`${home}/.local/bin/uvx`,
+		);
+	});
+
+	test("PATH wins over the fallback folders", () => {
+		const exists = (path: string) => path === "/custom/uvx" || path === `${home}/.local/bin/uvx`;
+		expect(resolveUvx({ PATH: "/custom" }, exists, home)).toBe("/custom/uvx");
+	});
+
+	test("works with no PATH at all", () => {
+		const exists = (path: string) => path === "/opt/homebrew/bin/uvx";
+		expect(resolveUvx({}, exists, home)).toBe("/opt/homebrew/bin/uvx");
+	});
+
+	test("falls back to the bare name when uv is not installed, so the error says so", () => {
+		expect(resolveUvx({ PATH: "/usr/bin" }, () => false, home)).toBe("uvx");
+		expect(browserSetupHint(new Error('Executable not found in $PATH: "uvx"'))).toContain(
+			"docs.astral.sh/uv",
+		);
+	});
+
+	test("searches the usual install folders", () => {
+		expect(uvSearchDirs(home)).toEqual([
+			`${home}/.local/bin`,
+			`${home}/.cargo/bin`,
+			"/opt/homebrew/bin",
+			"/usr/local/bin",
+		]);
 	});
 });

@@ -1,3 +1,6 @@
+import { accessSync, constants } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 import { type McpToolDefinition, READ_ONLY_ANNOTATIONS, toolResultText } from "../core/mcp.ts";
 import { loadStdioMcpTools, type StdioMcpClientOptions } from "../core/stdio-mcp.ts";
 
@@ -16,6 +19,12 @@ export interface BrowserConfig {
 
 /** Pinned to the line with `--mcp`. Unpinned `uvx` would follow upstream CLI rewrites. */
 export const BROWSER_USE_SPEC = "browser-use[cli]>=0.13,<0.14";
+
+/**
+ * Ask uv for its own Python instead of whatever the environment exposes. A GUI app's minimal PATH
+ * finds Apple's Python 3.9, which browser-use rejects. uv downloads a matching one if needed.
+ */
+export const BROWSER_USE_PYTHON = ">=3.11,<3.14";
 
 /** First start downloads about 100 Python packages, so give it far longer than a warm start. */
 export const BROWSER_INIT_TIMEOUT_MS = 180_000;
@@ -46,13 +55,51 @@ export function browserAccess(config: BrowserConfig | undefined): "off" | "menti
 	return config?.enabled === true ? "always" : "mention";
 }
 
+/** Where `uv` installs itself, for apps started from the Dock or Finder with a bare PATH. */
+export function uvSearchDirs(home = homedir()): string[] {
+	return [
+		join(home, ".local", "bin"),
+		join(home, ".cargo", "bin"),
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+	];
+}
+
+function isExecutable(path: string): boolean {
+	try {
+		accessSync(path, constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Find `uvx`. A GUI app inherits a minimal PATH that leaves out the folders `uv` installs into,
+ * so look on PATH first and then in those folders. Falls back to the bare name, which fails with
+ * a clear "uv is not installed" message.
+ */
+export function resolveUvx(
+	env: Record<string, string | undefined> = process.env,
+	exists: (path: string) => boolean = isExecutable,
+	home = homedir(),
+): string {
+	const dirs = [...(env.PATH ?? "").split(delimiter).filter(Boolean), ...uvSearchDirs(home)];
+	for (const dir of dirs) {
+		const candidate = join(dir, "uvx");
+		if (exists(candidate)) return candidate;
+	}
+	return "uvx";
+}
+
 export function browserServerOptions(
 	config: BrowserConfig | undefined,
 	cwd: string,
+	uvx: string = resolveUvx(),
 ): StdioMcpClientOptions {
 	return {
-		command: "uvx",
-		args: ["--from", BROWSER_USE_SPEC, "browser-use", "--mcp"],
+		command: uvx,
+		args: ["--python", BROWSER_USE_PYTHON, "--from", BROWSER_USE_SPEC, "browser-use", "--mcp"],
 		cwd,
 		namePrefix: "browser",
 		initTimeoutMs: BROWSER_INIT_TIMEOUT_MS,
