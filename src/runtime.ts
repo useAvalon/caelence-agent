@@ -111,6 +111,11 @@ export interface HarnessTurnOptions {
 	/** Tool names hidden from the model for this turn only. */
 	excludeTools?: readonly string[];
 	/**
+	 * Data for this turn that the harness passes back to the host's `intercept` hook untouched, for
+	 * example flags the host's UI sent with the request.
+	 */
+	hostData?: Record<string, unknown>;
+	/**
 	 * Ask the user only about requests this returns true for. Every other tool call runs without a
 	 * prompt. The `deny` policy and the host denylist still apply to the calls it lets through.
 	 */
@@ -631,6 +636,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 						: {}),
 					...(turnOptions?.systemAppend ? { systemAppend: turnOptions.systemAppend } : {}),
 					...(turnOptions?.excludeTools?.length ? { excludeTools: turnOptions.excludeTools } : {}),
+					...(turnOptions?.hostData ? { hostData: turnOptions.hostData } : {}),
 				},
 				capture,
 				{ signal: turnOptions?.signal },

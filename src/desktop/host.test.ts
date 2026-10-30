@@ -175,6 +175,25 @@ describe("bridge host extensions", () => {
 		}
 	});
 
+	test("beforeTurn displayMessage cleans a message that arrives already prefixed", async () => {
+		const ctx = await withBridge({
+			beforeTurn: (_ctx, { message }) => ({
+				displayMessage: message.replace(/^\[banner\]\n\n/, ""),
+			}),
+		});
+		try {
+			await sse(await ctx.post("/turn", { message: "[banner]\n\nopen my notes" }));
+			// The model still sees the full message the client sent.
+			expect(ctx.seen.message).toBe("[banner]\n\nopen my notes");
+			const state = (await (await ctx.get("/state")).json()) as { title: string };
+			expect(state.title).toBe("open my notes");
+			const stored = JSON.stringify(await ctx.harness.store.get(ctx.harness.activeSessionId ?? ""));
+			expect(stored).not.toContain("[banner]");
+		} finally {
+			await ctx.close();
+		}
+	});
+
 	test("beforeTurn can answer without the model, and nothing is saved", async () => {
 		const ctx = await withBridge({
 			beforeTurn: () => ({ reply: "I didn't catch that." }),

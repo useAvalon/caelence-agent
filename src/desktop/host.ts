@@ -42,6 +42,12 @@ export interface BridgeHost {
 export interface BridgeTurnPlan {
 	/** What the model sees. Defaults to the user's message. */
 	message?: string;
+	/**
+	 * What the chat stores and titles the conversation with. Set it when the incoming message
+	 * already carries a host prefix that should not show up in the chat. Defaults to the user's
+	 * message, or to the original message when `message` is changed.
+	 */
+	displayMessage?: string;
 	/** Per-turn options passed to `runTurn`. The bridge sets `displayMessage` for you. */
 	options?: Omit<HarnessTurnOptions, "signal" | "approvalAsk" | "editUserTurn" | "displayMessage">;
 	/** Answer with this text and skip the model. */

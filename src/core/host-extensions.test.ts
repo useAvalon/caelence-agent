@@ -321,6 +321,44 @@ describe("through createHarness", () => {
 	});
 });
 
+describe("hostData", () => {
+	test("reaches the interceptor untouched, and is empty when unset", async () => {
+		const s = spy();
+		const seen: Array<Record<string, unknown>> = [];
+		const intercept: TurnInterceptor = async ({ hostData }) => {
+			seen.push(hostData);
+			return undefined;
+		};
+		const d = deps({ constructAgent: s.constructAgent, intercept });
+		await runTurn(d, { message: "a", hostData: { autoApprove: true, n: 2 } }, () => undefined);
+		await runTurn(d, { message: "b" }, () => undefined);
+		expect(seen).toEqual([{ autoApprove: true, n: 2 }, {}]);
+	});
+
+	test("flows from createHarness turn options", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "host-data-"));
+		try {
+			let seen: Record<string, unknown> = {};
+			const harness = await createHarness({
+				cwd,
+				config: DEFAULT_CONFIG,
+				provider,
+				constructAgent: spy().constructAgent,
+				observability: noopObservability,
+				intercept: async ({ hostData }) => {
+					seen = hostData;
+					return undefined;
+				},
+			});
+			await harness.runTurn("hi", () => undefined, { hostData: { mode: "voice" } });
+			expect(seen).toEqual({ mode: "voice" });
+			harness.close();
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("provider factory for hosts", () => {
 	test("the interceptor receives the user's words and a provider factory", async () => {
 		const s = spy();

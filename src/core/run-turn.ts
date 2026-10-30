@@ -49,6 +49,8 @@ export interface TurnRequest {
 	systemAppend?: string;
 	/** Tool names hidden from the model for this turn only. */
 	excludeTools?: readonly string[];
+	/** Host data for this turn, passed to `intercept` untouched. */
+	hostData?: Record<string, unknown>;
 }
 
 /** What a host `intercept` hook can do with a turn. */
@@ -60,6 +62,8 @@ export interface TurnInterceptContext {
 	 * calls in OpenRouter usage. Undefined when the harness was given a fixed test provider.
 	 */
 	provider?: (modelId: string, title?: string) => MainModelProvider;
+	/** The `hostData` the host set for this turn. */
+	hostData: Record<string, unknown>;
 	history: Array<{ role: "user" | "assistant"; content: string }>;
 	toolNames: ReadonlySet<string>;
 	emit: AgentEventEmitter;
@@ -249,6 +253,7 @@ export async function runTurn(
 					{
 						message: stored,
 						provider: deps.resolveProvider,
+						hostData: req.hostData ?? {},
 						history,
 						toolNames: new Set(toolDefs.map((def) => def.name)),
 						emit: capture,

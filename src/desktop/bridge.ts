@@ -979,7 +979,11 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 					.runTurn(plan?.message ?? message, send, {
 						...plan?.options,
 						// What the user typed is what the chat stores, whatever the model was shown.
-						...(plan?.message !== undefined ? { displayMessage: message } : {}),
+						...(plan?.displayMessage !== undefined
+							? { displayMessage: plan.displayMessage }
+							: plan?.message !== undefined
+								? { displayMessage: message }
+								: {}),
 						signal: abort?.signal,
 						approvalAsk: (req: ApprovalRequest) => waitForApproval(pending, req),
 						...(editUserTurn !== undefined ? { editUserTurn } : {}),

@@ -1,3 +1,4 @@
+export { resolveAgentCwd } from "./agent-cwd.ts";
 export type { BrowserConfig } from "./browser/browser-use.ts";
 export {
 	CAELENCE_THEME,
@@ -113,6 +114,7 @@ export {
 	startDesktopBridge,
 } from "./desktop/bridge.ts";
 export type { BridgeHost, BridgeHostContext, BridgeTurnPlan } from "./desktop/host.ts";
+export { harnessHome } from "./desktop/secrets.ts";
 export {
 	type ChatFn,
 	createOpenRouterChat,
