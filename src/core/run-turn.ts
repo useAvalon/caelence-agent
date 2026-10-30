@@ -53,7 +53,13 @@ export interface TurnRequest {
 
 /** What a host `intercept` hook can do with a turn. */
 export interface TurnInterceptContext {
+	/** What the user typed, without any host prefix. */
 	message: string;
+	/**
+	 * A model provider for `modelId`, for hosts that run their own model calls. `title` labels the
+	 * calls in OpenRouter usage. Undefined when the harness was given a fixed test provider.
+	 */
+	provider?: (modelId: string, title?: string) => MainModelProvider;
 	history: Array<{ role: "user" | "assistant"; content: string }>;
 	toolNames: ReadonlySet<string>;
 	emit: AgentEventEmitter;
@@ -77,7 +83,7 @@ export interface RunTurnDeps {
 	store: SessionStore;
 	provider: MainModelProvider;
 	constructAgent: ConstructAgent;
-	resolveProvider?: (modelId: string) => MainModelProvider;
+	resolveProvider?: (modelId: string, title?: string) => MainModelProvider;
 	summarize?: SummarizerFn;
 	contextWindowTokens?: number;
 	maxTokens?: number;
@@ -241,7 +247,8 @@ export async function runTurn(
 				const outcome = await tryIntercept(
 					deps.intercept,
 					{
-						message: req.message,
+						message: stored,
+						provider: deps.resolveProvider,
 						history,
 						toolNames: new Set(toolDefs.map((def) => def.name)),
 						emit: capture,

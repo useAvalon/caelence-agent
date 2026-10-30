@@ -320,3 +320,60 @@ describe("through createHarness", () => {
 		}
 	});
 });
+
+describe("provider factory for hosts", () => {
+	test("the interceptor receives the user's words and a provider factory", async () => {
+		const s = spy();
+		let seenMessage = "";
+		let hasProvider = false;
+		const calls: Array<[string, string | undefined]> = [];
+		await runTurn(
+			deps({
+				constructAgent: s.constructAgent,
+				resolveProvider: (id, title) => {
+					calls.push([id, title]);
+					return provider;
+				},
+				intercept: async (ctx) => {
+					seenMessage = ctx.message;
+					hasProvider = typeof ctx.provider === "function";
+					ctx.provider?.("acme/model", "agent:writer");
+					return { reply: "done" };
+				},
+			}),
+			{ message: "[banner]\n\nopen notes", displayMessage: "open notes" },
+			() => undefined,
+		);
+		expect(seenMessage).toBe("open notes");
+		expect(hasProvider).toBe(true);
+		expect(calls).toEqual([["acme/model", "agent:writer"]]);
+	});
+
+	test("the title becomes the X-Title header on real OpenRouter calls", async () => {
+		const { constructOpenRouterProvider } = await import("./strands.ts");
+		const seenTitles: string[] = [];
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+			const headers = new Headers(init?.headers);
+			seenTitles.push(headers.get("x-title") ?? "");
+			return new Response(JSON.stringify({ error: { message: "stop" } }), { status: 400 });
+		}) as unknown as typeof fetch;
+		try {
+			for (const title of ["agent:writer", undefined]) {
+				const p = constructOpenRouterProvider({
+					apiKey: "sk-test",
+					model: "acme/model",
+					baseUrl: "https://openrouter.ai/api/v1",
+					...(title ? { title } : {}),
+				});
+				for await (const _event of p.stream({ messages: [{ role: "user", content: "hi" }] })) {
+					// drain
+				}
+			}
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		expect(seenTitles[0]).toBe("agent:writer");
+		expect(seenTitles[1]).toBe("Caelence agent");
+	});
+});

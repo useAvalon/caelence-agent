@@ -327,13 +327,14 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			: await createObservability({ enabled: config.observability?.enabled }));
 	if (!options.observability) void syncPrompts({ prompts: harnessPromptRecords() });
 	const agentVersion = resolveAgentVersion();
-	const makeProvider = (id: string): MainModelProvider =>
+	const makeProvider = (id: string, title?: string): MainModelProvider =>
 		options.provider ??
 		constructOpenRouterProvider({
 			apiKey,
 			model: id,
 			baseUrl: or.baseUrl,
 			sessionId: () => activeSessionId,
+			...(title ? { title } : {}),
 		});
 	let provider = makeProvider(modelId);
 	const constructAgent = options.constructAgent ?? createConstructAgent();
@@ -593,7 +594,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				store,
 				provider,
 				constructAgent,
-				resolveProvider: options.provider ? undefined : (id) => makeProvider(id),
+				resolveProvider: options.provider ? undefined : (id, title) => makeProvider(id, title),
 				summarize: defaultSummarizer(provider),
 				observability,
 				traceName: "agent_turn",
