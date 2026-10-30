@@ -415,3 +415,106 @@ describe("provider factory for hosts", () => {
 		expect(seenTitles[1]).toBe("Caelence agent");
 	});
 });
+
+describe("browser turn option", () => {
+	async function setup(config: Partial<typeof DEFAULT_CONFIG> = {}) {
+		const cwd = await mkdtemp(join(tmpdir(), "host-browser-"));
+		const counter = { starts: 0 };
+		const seen = { tools: [] as string[] };
+		const harness = await createHarness({
+			cwd,
+			config: { ...DEFAULT_CONFIG, ...config },
+			provider,
+			observability: noopObservability,
+			constructAgent: (input) => {
+				seen.tools = input.tools.map((t) => t.name);
+				return { async run() {} };
+			},
+			browserLoader: async () => {
+				counter.starts += 1;
+				return {
+					tools: [
+						{
+							name: "browser__browser_navigate",
+							description: "navigate",
+							inputSchema: { type: "object", properties: {} },
+							annotations: UNKNOWN_TOOL_ANNOTATIONS,
+							async handler() {
+								return textResult("ok");
+							},
+						},
+					],
+					close: () => undefined,
+				};
+			},
+		});
+		return { cwd, harness, counter, seen };
+	}
+
+	test("turns the browser on for the turn and the rest of the chat, without @browser", async () => {
+		const { cwd, harness, counter, seen } = await setup();
+		try {
+			expect(harness.browserActive).toBe(false);
+			await harness.runTurn("write an article on medium", () => undefined, { browser: true });
+			expect(seen.tools).toContain("browser__browser_navigate");
+			expect(harness.browserActive).toBe(true);
+			await harness.runTurn("now publish it", () => undefined);
+			expect(seen.tools).toContain("browser__browser_navigate");
+			expect(counter.starts).toBe(1);
+		} finally {
+			harness.close();
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("does not start the server on turns that do not ask for it", async () => {
+		const { cwd, harness, counter, seen } = await setup();
+		try {
+			await harness.runTurn("hello", () => undefined, { browser: false });
+			await harness.runTurn("hello again", () => undefined);
+			expect(counter.starts).toBe(0);
+			expect(seen.tools).not.toContain("browser__browser_navigate");
+			expect(harness.browserActive).toBe(false);
+		} finally {
+			harness.close();
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("a new chat turns it off again", async () => {
+		const { cwd, harness } = await setup();
+		try {
+			await harness.runTurn("go", () => undefined, { browser: true });
+			expect(harness.browserActive).toBe(true);
+			harness.setSession(undefined);
+			expect(harness.browserActive).toBe(false);
+		} finally {
+			harness.close();
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("config enabled:false wins over the turn option", async () => {
+		const { cwd, harness, counter } = await setup({ browser: { enabled: false } });
+		try {
+			await harness.runTurn("go", () => undefined, { browser: true });
+			expect(counter.starts).toBe(0);
+			expect(harness.browserActive).toBe(false);
+		} finally {
+			harness.close();
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("is ignored outside agent mode", async () => {
+		const { cwd, harness, counter } = await setup({ mode: "ask" });
+		try {
+			await harness.runTurn("go", () => undefined, { browser: true });
+			expect(counter.starts).toBe(0);
+			expect(harness.browserActive).toBe(false);
+		} finally {
+			harness.close();
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+});

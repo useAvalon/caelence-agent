@@ -111,6 +111,11 @@ export interface HarnessTurnOptions {
 	/** Tool names hidden from the model for this turn only. */
 	excludeTools?: readonly string[];
 	/**
+	 * Turn the browser tools on for this turn and the rest of the chat, as if the user had written
+	 * `@browser`. Ignored when `browser.enabled` is false in the config or the mode is not `agent`.
+	 */
+	browser?: boolean;
+	/**
 	 * Data for this turn that the harness passes back to the host's `intercept` hook untouched, for
 	 * example flags the host's UI sent with the request.
 	 */
@@ -132,6 +137,8 @@ export interface HarnessRuntime {
 	modelId: string;
 	mode: AgentMode;
 	activeSessionId?: string;
+	/** True when the browser tools are on for the current chat, by `@browser`, a turn option, or config. */
+	readonly browserActive: boolean;
 	spend?: TokenUsage;
 	hasApiKey: boolean;
 	setApiKey(key: string): void;
@@ -304,12 +311,12 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	let browserSticky = false;
 	let browserTools: McpToolDefinition[] = [];
 	let browserNote = "";
-	const resolveBrowser = async (message: string): Promise<void> => {
+	const resolveBrowser = async (message: string, requested = false): Promise<void> => {
 		browserTools = [];
 		browserNote = "";
 		const access = browserAccess(config.browser);
 		if (access === "off" || mode !== "agent") return;
-		if (mentionsBrowser(message)) browserSticky = true;
+		if (requested || mentionsBrowser(message)) browserSticky = true;
 		if (access !== "always" && !browserSticky) return;
 		try {
 			browserStart ??= startBrowserTools(config.browser, cwd, options.browserLoader);
@@ -395,6 +402,11 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		spend: undefined,
 		get activeSessionId() {
 			return activeSessionId;
+		},
+		get browserActive() {
+			const access = browserAccess(config.browser);
+			if (access === "off" || mode !== "agent") return false;
+			return access === "always" || browserSticky;
 		},
 		set activeSessionId(id: string | undefined) {
 			if (id !== activeSessionId) browserSticky = false;
@@ -555,7 +567,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			});
 			activeEmit = emit;
 			activeApproval = approval;
-			await resolveBrowser(userText);
+			await resolveBrowser(userText, turnOptions?.browser === true);
 			const tools = baseTools();
 			if (subagentsEnabled && toolsAllowedInMode(mode, "task")) {
 				tools.push(
