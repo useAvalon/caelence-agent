@@ -1,4 +1,5 @@
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import {
@@ -29,6 +30,124 @@ export const PLAYWRIGHT_MCP_VERSION = "0.0.83";
 export const DEFAULT_CHROME_ENDPOINT = "chrome";
 
 const INIT_TIMEOUT_MS = 120_000;
+
+export type BrowserApp = NonNullable<BrowserConfig["app"]>;
+
+interface AppProfile {
+	/** Name shown to the user in setup steps. */
+	label: string;
+	/** Playwright channel, when Playwright knows this browser by name. */
+	channel?: string;
+	/** User-data folder, relative to ~/Library/Application Support. */
+	dataDir: string;
+}
+
+/**
+ * Chromium browsers on macOS. Playwright can find Chrome and Edge by name. For the others the
+ * harness reads the browser's own DevToolsActivePort file and hands over a ws:// address.
+ */
+export const BROWSER_APPS: Record<BrowserApp, AppProfile> = {
+	chrome: { label: "Chrome", channel: "chrome", dataDir: "Google/Chrome" },
+	edge: { label: "Edge", channel: "msedge", dataDir: "Microsoft Edge" },
+	arc: { label: "Arc", dataDir: "Arc/User Data" },
+	brave: { label: "Brave", dataDir: "BraveSoftware/Brave-Browser" },
+	chromium: { label: "Chromium", dataDir: "Chromium" },
+};
+
+export function appSupportDir(home = homedir()): string {
+	return join(home, "Library", "Application Support");
+}
+
+/**
+ * Read `DevToolsActivePort` from a browser's user-data folder: the port on the first line and the
+ * browser path on the second. Returns the ws:// address, or undefined when the file is missing or
+ * malformed.
+ */
+export function readDevToolsEndpoint(
+	dataDir: string,
+	read: (path: string) => string = (p) => readFileSync(p, "utf8"),
+): string | undefined {
+	try {
+		const [port, path] = read(join(dataDir, "DevToolsActivePort")).split("\n");
+		const p = port?.trim();
+		const wsPath = path?.trim();
+		if (!p || !/^\d{2,5}$/.test(p) || !wsPath?.startsWith("/devtools/browser/")) return undefined;
+		return `ws://127.0.0.1:${p}${wsPath}`;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * An address nothing listens on. Used when the browser the user asked for is not ready, so the
+ * attach fails with that browser's setup steps and never falls through to a different browser.
+ */
+export const NOT_READY_ENDPOINT = "http://127.0.0.1:1";
+
+export interface ResolvedTarget {
+	/** Value for --cdp-endpoint. */
+	endpoint: string;
+	/** Browser name for messages. */
+	label: string;
+	app: BrowserApp | "custom";
+}
+
+/**
+ * Decide where to attach. An explicit endpoint wins. A browser Playwright knows by name uses its
+ * channel. Others use the ws:// address in their DevToolsActivePort file, or, if there is none
+ * yet, a placeholder that fails with the setup steps.
+ */
+export function resolveTarget(
+	config: BrowserConfig | undefined,
+	home = homedir(),
+	read?: (path: string) => string,
+): ResolvedTarget {
+	if (config?.chromeEndpoint?.trim()) {
+		return { endpoint: config.chromeEndpoint.trim(), label: "your browser", app: "custom" };
+	}
+	const app = config?.app ?? "chrome";
+	const profile = BROWSER_APPS[app] ?? BROWSER_APPS.chrome;
+	if (config?.userDataDir?.trim()) {
+		const ws = readDevToolsEndpoint(config.userDataDir.trim(), read);
+		return { endpoint: ws ?? NOT_READY_ENDPOINT, label: profile.label, app };
+	}
+	if (profile.channel) return { endpoint: profile.channel, label: profile.label, app };
+	const ws = readDevToolsEndpoint(join(appSupportDir(home), profile.dataDir), read);
+	return { endpoint: ws ?? NOT_READY_ENDPOINT, label: profile.label, app };
+}
+
+/** True when something accepts connections on the port in a ws:// address. */
+export function portAnswers(endpoint: string, timeoutMs = 1500): Promise<boolean> {
+	return new Promise((resolve) => {
+		let port: number;
+		try {
+			port = Number(new URL(endpoint).port);
+		} catch {
+			return resolve(false);
+		}
+		if (!port) return resolve(false);
+		const socket = createConnection({ host: "127.0.0.1", port });
+		const done = (ok: boolean) => {
+			socket.destroy();
+			resolve(ok);
+		};
+		socket.setTimeout(timeoutMs, () => done(false));
+		socket.once("connect", () => done(true));
+		socket.once("error", () => done(false));
+	});
+}
+
+/**
+ * The file survives a quit or a crash, so a ws:// address read from it can point at nothing, or at
+ * a different program that reused the port. Use it only if something is listening.
+ */
+export async function liveTarget(
+	target: ResolvedTarget,
+	probe: (endpoint: string) => Promise<boolean> = portAnswers,
+): Promise<ResolvedTarget> {
+	if (!target.endpoint.startsWith("ws://")) return target;
+	return (await probe(target.endpoint)) ? target : { ...target, endpoint: NOT_READY_ENDPOINT };
+}
 
 /** Tools the agent may use. Anything else Playwright MCP adds is not offered. */
 const ALLOWED = new Set([
@@ -141,8 +260,9 @@ export function ownChromeServerOptions(
 	cwd: string,
 	npx: { command: string; dir?: string } = resolveNpx(),
 	basePath: string | undefined = process.env.PATH,
+	target: ResolvedTarget = resolveTarget(config),
 ): StdioMcpClientOptions {
-	const endpoint = config?.chromeEndpoint?.trim() || DEFAULT_CHROME_ENDPOINT;
+	const endpoint = target.endpoint;
 	return {
 		command: npx.command,
 		args: [
@@ -190,10 +310,20 @@ function covers(trusted: string, host: string): boolean {
 const ATTACH_FAILED_RE =
 	/DevToolsActivePort|Could not connect to chrome|ECONNREFUSED|remote debugging/i;
 
-export const CHROME_NOT_READY =
-	"Chrome is not set up for this yet. In Chrome, open chrome://inspect/#remote-debugging, tick " +
-	'"Allow remote debugging for this browser instance", then approve the permission Chrome shows. ' +
-	"Tell the user these steps and wait for them to say it is done. Do not work around this.";
+export function notReadyMessage(label = "Chrome"): string {
+	const missing =
+		label === "Chrome"
+			? ""
+			: ` If ${label} has no such setting, say so plainly and suggest Chrome instead. Do not try another way.`;
+	return (
+		`${label} is not set up for this yet. Make sure ${label} is open, then in ${label} open ` +
+		'chrome://inspect/#remote-debugging, tick "Allow remote debugging for this browser instance", ' +
+		`then approve the permission ${label} shows. Tell the user these steps and wait for them to ` +
+		`say it is done. Do not work around this.${missing}`
+	);
+}
+
+export const CHROME_NOT_READY = notReadyMessage("Chrome");
 
 interface RefInfo {
 	role: string;
@@ -201,6 +331,8 @@ interface RefInfo {
 }
 
 export interface OwnChromeGuard {
+	/** True once an attach has failed, so the server should be started again. */
+	stale(): boolean;
 	/** Hosts the user named. Opening these does not ask. */
 	trust(hosts: readonly string[]): void;
 	/** A new chat: forget the agent's tab, approvals, and trusted sites. */
@@ -212,13 +344,14 @@ export interface OwnChromeGuard {
  * Wrap Playwright MCP's tools with the allowlist, the own-tab rule, and per-call confirmations.
  * The state below is per chat: a new chat starts a new session.
  */
-export function createOwnChromeGuard(): OwnChromeGuard {
+export function createOwnChromeGuard(label = "Chrome"): OwnChromeGuard {
 	const trusted = new Set<string>();
 	const approved = new Set<string>();
 	const refs = new Map<string, RefInfo>();
 	let ownTab = false;
 	let typed = false;
 	let currentUrl: string | undefined;
+	let stale = false;
 
 	const isTrusted = (host: string): boolean =>
 		[...trusted, ...approved].some((entry) => covers(entry, host));
@@ -310,7 +443,9 @@ export function createOwnChromeGuard(): OwnChromeGuard {
 			const text = toolResultText(result);
 
 			if (result.isError) {
-				return ATTACH_FAILED_RE.test(text) ? errorResult(CHROME_NOT_READY) : result;
+				if (!ATTACH_FAILED_RE.test(text)) return result;
+				stale = true;
+				return errorResult(notReadyMessage(label));
 			}
 
 			// Opening a site only gets this far when the user approved it, so remember the answer.
@@ -336,6 +471,7 @@ export function createOwnChromeGuard(): OwnChromeGuard {
 	}
 
 	return {
+		stale: () => stale,
 		reset() {
 			trusted.clear();
 			approved.clear();
@@ -365,14 +501,19 @@ export async function startOwnChromeTools(
 	config: BrowserConfig | undefined,
 	cwd: string,
 	load: typeof loadStdioMcpTools = loadStdioMcpTools,
+	probe?: (endpoint: string) => Promise<boolean>,
+	home = homedir(),
 ): Promise<BrowserSession> {
-	const loaded = await load(ownChromeServerOptions(config, cwd));
-	const guard = createOwnChromeGuard();
+	// Read the browser's port file now, so a switch turned on since the last try is picked up.
+	const target = await liveTarget(resolveTarget(config, home), probe);
+	const loaded = await load(ownChromeServerOptions(config, cwd, undefined, undefined, target));
+	const guard = createOwnChromeGuard(target.label);
 	return {
 		tools: guard.tools(loaded.tools),
 		close: loaded.close,
 		trust: (hosts) => guard.trust(hosts),
 		reset: () => guard.reset(),
+		stale: () => guard.stale(),
 	};
 }
 

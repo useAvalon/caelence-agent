@@ -1,13 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { type McpToolDefinition, textResult, UNKNOWN_TOOL_ANNOTATIONS } from "../core/mcp.ts";
 import {
+	BROWSER_APPS,
 	CHROME_NOT_READY,
 	createOwnChromeGuard,
 	hostsInText,
+	liveTarget,
+	NOT_READY_ENDPOINT,
 	nodeSearchDirs,
+	notReadyMessage,
 	ownChromeServerOptions,
 	PLAYWRIGHT_MCP_VERSION,
+	portAnswers,
+	readDevToolsEndpoint,
 	resolveNpx,
+	resolveTarget,
+	startOwnChromeTools,
 } from "./own-chrome.ts";
 
 /** A snapshot in the exact shape Playwright MCP returns, captured from a real run. */
@@ -391,5 +399,195 @@ describe("hostsInText", () => {
 		]);
 		expect(hostsInText("go to www.github.com/pulls.")).toEqual(["github.com"]);
 		expect(hostsInText("write an article")).toEqual([]);
+	});
+});
+
+describe("which browser to attach to", () => {
+	const home = "/Users/someone";
+	const file = (map: Record<string, string>) => (path: string) => {
+		const hit = map[path];
+		if (hit === undefined) throw new Error("ENOENT");
+		return hit;
+	};
+	const ARC_FILE = `${home}/Library/Application Support/Arc/User Data/DevToolsActivePort`;
+
+	test("Chrome is the default and is found by Playwright's channel name", () => {
+		expect(resolveTarget(undefined, home)).toMatchObject({
+			endpoint: "chrome",
+			label: "Chrome",
+			app: "chrome",
+		});
+		expect(resolveTarget({ app: "edge" }, home)).toMatchObject({
+			endpoint: "msedge",
+			label: "Edge",
+		});
+	});
+
+	test("Arc is read from its own port file, as a ws:// address", () => {
+		const target = resolveTarget(
+			{ app: "arc" },
+			home,
+			file({ [ARC_FILE]: "55123\n/devtools/browser/abc-123\n" }),
+		);
+		expect(target).toEqual({
+			endpoint: "ws://127.0.0.1:55123/devtools/browser/abc-123",
+			label: "Arc",
+			app: "arc",
+		});
+	});
+
+	test("an Arc that is not set up fails closed and never falls through to Chrome", () => {
+		const target = resolveTarget({ app: "arc" }, home, file({}));
+		expect(target.endpoint).toBe(NOT_READY_ENDPOINT);
+		expect(target.endpoint).not.toBe("chrome");
+		expect(target.label).toBe("Arc");
+	});
+
+	test("a custom data folder is read the same way", () => {
+		const target = resolveTarget(
+			{ app: "brave", userDataDir: "/data/brave" },
+			home,
+			file({ "/data/brave/DevToolsActivePort": "40001\n/devtools/browser/zz\n" }),
+		);
+		expect(target.endpoint).toBe("ws://127.0.0.1:40001/devtools/browser/zz");
+		expect(resolveTarget({ app: "brave", userDataDir: "/none" }, home, file({})).endpoint).toBe(
+			NOT_READY_ENDPOINT,
+		);
+	});
+
+	test("an explicit endpoint wins over the app", () => {
+		const target = resolveTarget(
+			{ app: "arc", chromeEndpoint: "http://127.0.0.1:9333" },
+			home,
+			file({}),
+		);
+		expect(target.endpoint).toBe("http://127.0.0.1:9333");
+	});
+
+	test("every app has a label and a data folder", () => {
+		for (const profile of Object.values(BROWSER_APPS)) {
+			expect(profile.label.length).toBeGreaterThan(0);
+			expect(profile.dataDir.length).toBeGreaterThan(0);
+		}
+	});
+});
+
+describe("reading DevToolsActivePort", () => {
+	const read = (text: string) => () => text;
+	test("accepts the real two-line format", () => {
+		expect(readDevToolsEndpoint("/d", read("62800\n/devtools/browser/8f6b-44a9\n"))).toBe(
+			"ws://127.0.0.1:62800/devtools/browser/8f6b-44a9",
+		);
+	});
+	test("rejects anything else", () => {
+		for (const text of [
+			"",
+			"62800",
+			"abc\n/devtools/browser/x",
+			"62800\n/other/path",
+			"0\n/devtools/browser/x",
+			"999999\n/devtools/browser/x",
+		]) {
+			expect(readDevToolsEndpoint("/d", read(text))).toBeUndefined();
+		}
+		expect(
+			readDevToolsEndpoint("/d", () => {
+				throw new Error("nope");
+			}),
+		).toBeUndefined();
+	});
+});
+
+describe("a stale port file", () => {
+	const ws = {
+		endpoint: "ws://127.0.0.1:55123/devtools/browser/abc",
+		label: "Arc",
+		app: "arc" as const,
+	};
+	test("is used only when something answers on the port", async () => {
+		expect((await liveTarget(ws, async () => true)).endpoint).toBe(ws.endpoint);
+		const dead = await liveTarget(ws, async () => false);
+		expect(dead.endpoint).toBe(NOT_READY_ENDPOINT);
+		expect(dead.label).toBe("Arc");
+	});
+	test("a channel name is not probed", async () => {
+		let probed = 0;
+		const chrome = { endpoint: "chrome", label: "Chrome", app: "chrome" as const };
+		await liveTarget(chrome, async () => {
+			probed += 1;
+			return false;
+		});
+		expect(probed).toBe(0);
+	});
+	test("a closed port does not answer", async () => {
+		expect(await portAnswers("ws://127.0.0.1:1/devtools/browser/x", 500)).toBe(false);
+		expect(await portAnswers("not a url", 500)).toBe(false);
+	});
+});
+
+describe("setup message names the browser", () => {
+	test("Chrome keeps the plain steps", () => {
+		expect(notReadyMessage("Chrome")).toBe(CHROME_NOT_READY);
+		expect(CHROME_NOT_READY).not.toContain("no such setting");
+	});
+	test("Arc is named, and the agent may say the setting is missing", () => {
+		const text = notReadyMessage("Arc");
+		expect(text).toContain("Make sure Arc is open");
+		expect(text).toContain("in Arc open chrome://inspect/#remote-debugging");
+		expect(text).toContain("If Arc has no such setting, say so plainly and suggest Chrome");
+	});
+});
+
+describe("the server is rebuilt after a failed attach", () => {
+	function loader() {
+		const started: string[] = [];
+		const closed: number[] = [];
+		const load: typeof import("../core/stdio-mcp.ts").loadStdioMcpTools = async (options) => {
+			const id = started.length;
+			started.push(options.args?.find((a) => a.startsWith("--cdp-endpoint=")) ?? "");
+			return {
+				tools: [
+					{
+						name: "browser__browser_tabs",
+						description: "tabs",
+						inputSchema: { type: "object", properties: {} },
+						annotations: UNKNOWN_TOOL_ANNOTATIONS,
+						async handler() {
+							return textResult(
+								"Error: Could not connect to chrome: DevToolsActivePort file not found",
+								true,
+							);
+						},
+					},
+				],
+				close: () => {
+					closed.push(id);
+				},
+			};
+		};
+		return { load, started, closed };
+	}
+
+	test("a failed attach marks the session stale, and a good one does not", async () => {
+		const { load } = loader();
+		const session = await startOwnChromeTools(
+			{ app: "arc" },
+			"/tmp",
+			load,
+			async () => false,
+			"/nonexistent-home",
+		);
+		expect(session.stale?.()).toBe(false);
+		const tabs = session.tools[0];
+		const res = await tabs?.handler({ action: "list" });
+		expect(res?.isError).toBe(true);
+		expect(res?.content[0]?.text).toContain("Make sure Arc is open");
+		expect(session.stale?.()).toBe(true);
+	});
+
+	test("the attach address is read when the server starts, so a later start sees a newer port", async () => {
+		const { load, started } = loader();
+		await startOwnChromeTools({ app: "arc" }, "/tmp", load, async () => false, "/nonexistent-home");
+		expect(started[0]).toBe(`--cdp-endpoint=${NOT_READY_ENDPOINT}`);
 	});
 });

@@ -21,7 +21,15 @@ export interface BrowserConfig {
 	 * needs the switch at chrome://inspect/#remote-debugging turned on once.
 	 */
 	backend?: "separate" | "chrome";
-	/** Where to attach for the `chrome` backend. Default is the running Chrome. Mostly for tests. */
+	/**
+	 * Which browser the `chrome` backend attaches to. `chrome` is the default. `arc` reads Arc's
+	 * debugging port. Any other Chromium browser can be named by its user-data folder in
+	 * `userDataDir`.
+	 */
+	app?: "chrome" | "arc" | "brave" | "edge" | "chromium";
+	/** User-data folder of the browser to attach to, when `app` is not enough. */
+	userDataDir?: string;
+	/** Where to attach for the `chrome` backend. Wins over `app`. Mostly for tests. */
 	chromeEndpoint?: string;
 }
 
@@ -171,6 +179,11 @@ export interface BrowserSession {
 	trust?(hosts: readonly string[]): void;
 	/** Forget per-chat state, such as the agent's own tab. Own-Chrome backend only. */
 	reset?(): void;
+	/**
+	 * True when the browser could not be reached. The server is fixed to the address it started
+	 * with, so the runtime starts a new one on the next turn, after the user has set the browser up.
+	 */
+	stale?(): boolean;
 }
 
 export async function startBrowserTools(

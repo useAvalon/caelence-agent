@@ -227,6 +227,7 @@ Attaches to the Chrome you have open, with your logins, through [Playwright MCP]
 
 Because the agent acts as you on every site you are signed in to, this backend is stricter:
 
+- It attaches to the browser named by `browser.app`: `chrome` (default), `edge`, `arc`, `brave`, or `chromium`. It never falls back to a different one, so it cannot end up in a browser you did not choose. If that browser is not set up, the agent is told to say so, and the next turn tries again.
 - It gets 13 page tools. JavaScript execution, file upload, and network inspection are not offered.
 - It works only in a tab it opens itself. Closing and switching your tabs is refused, and so is navigating before it has its own tab, because navigation replaces the tab you are looking at.
 - You are asked before it opens a site you did not name, clicks a button that commits something (post, send, buy, delete, and the Danish equivalents), accepts a dialog, or clicks any button after typing. The last one does not depend on the button's wording. An approval covers one action, and "always allow" and a host's auto-approve mode do not skip it.

@@ -338,7 +338,14 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			browserStart ??= ownChrome
 				? startOwnChromeTools(config.browser, cwd, options.browserLoader)
 				: startBrowserTools(config.browser, cwd, options.browserLoader);
-			const started = await browserStart;
+			let started = await browserStart;
+			if (started.stale?.()) {
+				// The browser was not reachable last time and the server is fixed to the address it
+				// started with. The user may have set the browser up since, so start a fresh one.
+				started.close();
+				browserStart = startOwnChromeTools(config.browser, cwd, options.browserLoader);
+				started = await browserStart;
+			}
 			// Sites the user wrote, or the host app resolved from their words, open without asking.
 			started.trust?.([...hostsInText(message), ...trustedHosts]);
 			browserTools = started.tools;
