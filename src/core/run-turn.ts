@@ -540,6 +540,8 @@ async function approvalGranted(
 	callId: string,
 	input: Record<string, unknown>,
 ): Promise<boolean> {
+	const reason = def.confirm?.(input);
+	if (reason) return approval.request({ callId, toolName: def.name, input, reason });
 	if (!isRiskyToolCall(def.name) && !isFileWriteTool(def.name)) return true;
 	return approval.request({ callId, toolName: def.name, input });
 }

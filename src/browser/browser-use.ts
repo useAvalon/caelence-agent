@@ -13,8 +13,16 @@ import { loadStdioMcpTools, type StdioMcpClientOptions } from "../core/stdio-mcp
 export interface BrowserConfig {
 	/** undefined: on only when a message has @browser. true: always on. false: never. */
 	enabled?: boolean;
-	/** Run Chrome without a window. Default is a visible window. */
+	/** Run Chrome without a window. Default is a visible window. Only for the separate browser. */
 	headless?: boolean;
+	/**
+	 * Which Chrome to drive. `separate` (default) starts its own signed-out Chrome with browser-use.
+	 * `chrome` attaches to the Chrome the user is running, where they are already signed in. That
+	 * needs the switch at chrome://inspect/#remote-debugging turned on once.
+	 */
+	backend?: "separate" | "chrome";
+	/** Where to attach for the `chrome` backend. Default is the running Chrome. Mostly for tests. */
+	chromeEndpoint?: string;
 }
 
 /** Pinned to the line with `--mcp`. Unpinned `uvx` would follow upstream CLI rewrites. */
@@ -159,6 +167,10 @@ export function browserSetupHint(error: unknown): string {
 export interface BrowserSession {
 	tools: McpToolDefinition[];
 	close(): void;
+	/** Sites the user named, which the agent may open without asking. Own-Chrome backend only. */
+	trust?(hosts: readonly string[]): void;
+	/** Forget per-chat state, such as the agent's own tab. Own-Chrome backend only. */
+	reset?(): void;
 }
 
 export async function startBrowserTools(

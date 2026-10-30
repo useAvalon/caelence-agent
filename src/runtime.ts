@@ -8,6 +8,12 @@ import {
 	mentionsBrowser,
 	startBrowserTools,
 } from "./browser/browser-use.ts";
+import {
+	hostsInText,
+	ownChromeFailureHint,
+	ownChromePrompt,
+	startOwnChromeTools,
+} from "./browser/own-chrome.ts";
 import { resolveTheme, type Theme } from "./cli/theme.ts";
 import { type HarnessConfig, loadConfig, resolveOpenRouter } from "./config.ts";
 import {
@@ -115,6 +121,11 @@ export interface HarnessTurnOptions {
 	 * `@browser`. Ignored when `browser.enabled` is false in the config or the mode is not `agent`.
 	 */
 	browser?: boolean;
+	/**
+	 * Sites the user asked for, as a host app resolved them from their words ("x" to x.com). The
+	 * browser opens these without asking. Hosts written out in the message are trusted already.
+	 */
+	trustedHosts?: readonly string[];
 	/**
 	 * Data for this turn that the harness passes back to the host's `intercept` hook untouched, for
 	 * example flags the host's UI sent with the request.
@@ -311,7 +322,12 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	let browserSticky = false;
 	let browserTools: McpToolDefinition[] = [];
 	let browserNote = "";
-	const resolveBrowser = async (message: string, requested = false): Promise<void> => {
+	const ownChrome = config.browser?.backend === "chrome";
+	const resolveBrowser = async (
+		message: string,
+		requested = false,
+		trustedHosts: readonly string[] = [],
+	): Promise<void> => {
 		browserTools = [];
 		browserNote = "";
 		const access = browserAccess(config.browser);
@@ -319,13 +335,28 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		if (requested || mentionsBrowser(message)) browserSticky = true;
 		if (access !== "always" && !browserSticky) return;
 		try {
-			browserStart ??= startBrowserTools(config.browser, cwd, options.browserLoader);
-			browserTools = (await browserStart).tools;
-			browserNote = browserPrompt();
+			browserStart ??= ownChrome
+				? startOwnChromeTools(config.browser, cwd, options.browserLoader)
+				: startBrowserTools(config.browser, cwd, options.browserLoader);
+			const started = await browserStart;
+			// Sites the user wrote, or the host app resolved from their words, open without asking.
+			started.trust?.([...hostsInText(message), ...trustedHosts]);
+			browserTools = started.tools;
+			browserNote = ownChrome ? ownChromePrompt() : browserPrompt();
 		} catch (err) {
 			browserStart = undefined;
-			browserNote = browserFailurePrompt(browserSetupHint(err));
+			browserNote = browserFailurePrompt(
+				ownChrome ? ownChromeFailureHint(err) : browserSetupHint(err),
+			);
 		}
+	};
+	/** A new chat starts clean: the agent's tab, approvals, and trusted sites do not carry over. */
+	const resetBrowserChat = (): void => {
+		browserSticky = false;
+		void browserStart?.then(
+			(started) => started.reset?.(),
+			() => undefined,
+		);
 	};
 
 	const or = resolveOpenRouter(config);
@@ -409,7 +440,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			return access === "always" || browserSticky;
 		},
 		set activeSessionId(id: string | undefined) {
-			if (id !== activeSessionId) browserSticky = false;
+			if (id !== activeSessionId) resetBrowserChat();
 			activeSessionId = id;
 		},
 		get hasApiKey() {
@@ -431,7 +462,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			systemPrompt = composePrompt(mode);
 		},
 		setSession(id) {
-			if (id !== activeSessionId) browserSticky = false;
+			if (id !== activeSessionId) resetBrowserChat();
 			activeSessionId = id;
 		},
 		allowExecAlways() {
@@ -567,7 +598,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			});
 			activeEmit = emit;
 			activeApproval = approval;
-			await resolveBrowser(userText, turnOptions?.browser === true);
+			await resolveBrowser(userText, turnOptions?.browser === true, turnOptions?.trustedHosts);
 			const tools = baseTools();
 			if (subagentsEnabled && toolsAllowedInMode(mode, "task")) {
 				tools.push(

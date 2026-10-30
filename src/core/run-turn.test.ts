@@ -340,3 +340,88 @@ describe("runTurn", () => {
 		}
 	});
 });
+
+describe("tool confirm", () => {
+	function confirmTool(reason: (input: Record<string, unknown>) => string | undefined) {
+		const ran: Array<Record<string, unknown>> = [];
+		return {
+			ran,
+			tool: {
+				name: "web_click",
+				description: "click",
+				inputSchema: { type: "object", properties: {} },
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: false,
+				},
+				confirm: reason,
+				async handler(input: Record<string, unknown>) {
+					ran.push(input);
+					return { content: [{ type: "text" as const, text: "clicked" }] };
+				},
+			},
+		};
+	}
+
+	async function run(
+		tool: ReturnType<typeof confirmTool>["tool"],
+		ask: (req: { reason?: string }) => Promise<boolean>,
+	) {
+		const constructAgent: ConstructAgent = (input) => ({
+			async run() {
+				await input.tools[0]?.invoke({ element: "Post" });
+				await input.tools[0]?.invoke({ element: "Cancel" });
+			},
+		});
+		const events: AgentEvent[] = [];
+		const deps: RunTurnDeps = {
+			cwd: "/tmp",
+			name: "t",
+			systemPrompt: "s",
+			tools: [tool],
+			approval: createExecApprovalGate({ policy: "prompt", emit: (e) => events.push(e), ask }),
+			store: createFileSessionStore(await mkdtemp(join(tmpdir(), "confirm-"))),
+			provider: fakeProvider,
+			constructAgent,
+		};
+		await runTurn(deps, { message: "go" }, (e) => events.push(e));
+		return events;
+	}
+
+	test("asks only for calls the tool flags, and runs the rest", async () => {
+		const { tool, ran } = confirmTool((input) =>
+			input.element === "Post" ? "Click Post" : undefined,
+		);
+		const reasons: Array<string | undefined> = [];
+		await run(tool, async (req) => {
+			reasons.push(req.reason);
+			return true;
+		});
+		expect(reasons).toEqual(["Click Post"]);
+		expect(ran).toEqual([{ element: "Post" }, { element: "Cancel" }]);
+	});
+
+	test("a refused call is not run, and the next call is still judged on its own", async () => {
+		const { tool, ran } = confirmTool((input) =>
+			input.element === "Post" ? "Click Post" : undefined,
+		);
+		const events = await run(tool, async () => false);
+		expect(ran).toEqual([{ element: "Cancel" }]);
+		const ends = events.filter((e) => e.kind === "tool_call_end") as Array<{ success: boolean }>;
+		expect(ends.map((e) => e.success)).toEqual([false, true]);
+	});
+
+	test("a tool without confirm is unchanged", async () => {
+		const { tool, ran } = confirmTool(() => undefined);
+		delete (tool as { confirm?: unknown }).confirm;
+		let asked = 0;
+		await run(tool, async () => {
+			asked += 1;
+			return true;
+		});
+		expect(asked).toBe(0);
+		expect(ran).toHaveLength(2);
+	});
+});
