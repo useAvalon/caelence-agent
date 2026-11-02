@@ -66,7 +66,7 @@
     "@langfuse/client": "^5.11.1",
     "@langfuse/otel": "^5.11.1",
     "@langfuse/tracing": "^5.11.1",
-    "@opentelemetry/sdk-node": "^0.223.0"
+    "@opentelemetry/sdk-node": "^0.300.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
