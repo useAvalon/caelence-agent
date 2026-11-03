@@ -32,7 +32,10 @@ export type {
 	AgentEvent,
 	AgentEventEmitter,
 	MainModelProvider,
+	ProviderMessage,
 	ProviderStreamEvent,
+	ProviderToolDefinition,
+	ProviderTurnRequest,
 } from "./core/events.ts";
 export { isTerminalAgentEvent } from "./core/events.ts";
 export { createHookRunner, type HookConfig, type HookRunner } from "./core/hooks.ts";
@@ -52,6 +55,7 @@ export {
 	mcpToolListItem,
 	READ_ONLY_ANNOTATIONS,
 	resolveToolAnnotations,
+	type ToolResult,
 	textResult,
 	toolResultText,
 	UNKNOWN_TOOL_ANNOTATIONS,
@@ -86,7 +90,15 @@ export {
 	sessionTranscript,
 	titleFromUserMessage,
 } from "./core/session.ts";
-export type { AgentTool, ConstructAgent, ConstructedAgent } from "./core/strands.ts";
+export {
+	type AgentConstructionInput,
+	type AgentTool,
+	type ConstructAgent,
+	type ConstructedAgent,
+	constructOpenRouterProvider,
+	createConstructAgent,
+	type StrandsBackedProvider,
+} from "./core/strands.ts";
 export { addUsage, formatUsage, parseTokenUsage, type TokenUsage } from "./core/usage.ts";
 export { type ApprovalVerdict, classifyToolApproval } from "./decisions/approval.ts";
 export {
