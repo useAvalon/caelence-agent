@@ -214,10 +214,13 @@ const COMMIT_WORDS = [
 	"svar",
 ];
 /** Whole words only, so "Postcode" does not match "post". */
-const COMMIT_RE = new RegExp(`(?<![\\p{L}])(?:${COMMIT_WORDS.join("|")})(?![\\p{L}])`, "iu");
+export const COMMIT_RE = new RegExp(
+	String.raw`(?<![\p{L}])(?:${COMMIT_WORDS.join("|")})(?![\p{L}])`,
+	"iu",
+);
 
 /** Roles you click to move between fields. Clicking one is not a commit. */
-const FIELD_ROLES = new Set(["textbox", "searchbox", "textarea", "combobox"]);
+export const FIELD_ROLES = new Set(["textbox", "searchbox", "textarea", "combobox"]);
 
 /** Dirs where `node` and `npx` live, for apps started from the Dock with a bare PATH. */
 export function nodeSearchDirs(home = homedir()): string[] {
@@ -281,7 +284,7 @@ export function ownChromeServerOptions(
 	};
 }
 
-function hostOf(url: string | undefined): string | undefined {
+export function hostOf(url: string | undefined): string | undefined {
 	if (!url) return undefined;
 	try {
 		const parsed = new URL(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`);
@@ -303,7 +306,7 @@ export function hostsInText(text: string): string[] {
 }
 
 /** A host counts as trusted for itself and its subdomains: x.com covers api.x.com. */
-function covers(trusted: string, host: string): boolean {
+export function covers(trusted: string, host: string): boolean {
 	return host === trusted || host.endsWith(`.${trusted}`);
 }
 

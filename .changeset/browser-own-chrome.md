@@ -12,3 +12,4 @@ Browser control in the user's own Chrome, where they are already signed in.
 - A browser that could not be reached is retried on the next turn with a fresh server, so turning the switch on does not need a restart.
 - A host can pass `trustedHosts` per turn for sites it resolved from the user's words ("x" to x.com).
 - Finds `npx` when the app was started with a bare `PATH`, and keeps Playwright's output files out of the project folder.
+- Exports `COMMIT_RE`, `FIELD_ROLES`, `hostOf`, `hostCovers`, and `hostsInText`, so a host that drives its own browser window can ask about the same clicks and sites.

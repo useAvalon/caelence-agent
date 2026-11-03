@@ -1,6 +1,13 @@
 export { resolveAgentCwd } from "./agent-cwd.ts";
 export type { BrowserConfig } from "./browser/browser-use.ts";
 export {
+	COMMIT_RE,
+	covers as hostCovers,
+	FIELD_ROLES,
+	hostOf,
+	hostsInText,
+} from "./browser/own-chrome.ts";
+export {
 	CAELENCE_THEME,
 	PLAIN_THEME,
 	resolveTheme,
