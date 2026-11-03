@@ -153,6 +153,8 @@ export function constructOpenRouterProvider(options: {
 	baseUrl: string;
 	maxTokens?: number;
 	sessionId?: () => string | undefined;
+	/** `X-Title` sent to OpenRouter, so usage can be told apart by purpose. Defaults to the product name. */
+	title?: string;
 }): MainModelProvider {
 	if (!options.apiKey.trim()) {
 		return {
@@ -178,7 +180,7 @@ export function constructOpenRouterProvider(options: {
 			baseURL: options.baseUrl.replace(/\/+$/, ""),
 			defaultHeaders: {
 				"HTTP-Referer": "https://caelence.com",
-				"X-Title": PRODUCT_NAME,
+				"X-Title": options.title?.trim() || PRODUCT_NAME,
 			},
 			fetch: createUsageTrackingFetch(
 				(usage) => {

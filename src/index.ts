@@ -1,3 +1,4 @@
+export { resolveAgentCwd } from "./agent-cwd.ts";
 export type { BrowserConfig } from "./browser/browser-use.ts";
 export {
 	CAELENCE_THEME,
@@ -11,8 +12,10 @@ export {
 	DEFAULT_CONFIG,
 	DEFAULT_MODEL,
 	loadConfig,
+	OPENROUTER_DEFAULT_BASE_URL,
 	resolveConfigPath,
 	resolveOpenRouter,
+	stripTrailingSlashes,
 } from "./config.ts";
 export {
 	type ApprovalGate,
@@ -24,6 +27,7 @@ export {
 	isUploadEditRequest,
 	parseExecApprovalPolicy,
 } from "./core/approval.ts";
+export { errorMessage } from "./core/errors.ts";
 export type {
 	AgentEvent,
 	AgentEventEmitter,
@@ -64,7 +68,14 @@ export {
 	toolsAllowedInMode,
 	tryParseAgentMode,
 } from "./core/mode.ts";
-export { buildSystemPrompt, type RunTurnDeps, runTurn, type TurnRequest } from "./core/run-turn.ts";
+export {
+	buildSystemPrompt,
+	type RunTurnDeps,
+	runTurn,
+	type TurnInterceptContext,
+	type TurnInterceptor,
+	type TurnRequest,
+} from "./core/run-turn.ts";
 export {
 	createFileSessionStore,
 	createMemorySessionStore,
@@ -109,6 +120,14 @@ export {
 export { turnHasDurableFact } from "./decisions/memory.ts";
 export type { ShortcutContext, ShortcutPlan, ShortcutPlanner } from "./decisions/shortcuts.ts";
 export {
+	type BridgeReady,
+	type DesktopState,
+	type StartDesktopBridgeOptions,
+	startDesktopBridge,
+} from "./desktop/bridge.ts";
+export type { BridgeHost, BridgeHostContext, BridgeTurnPlan } from "./desktop/host.ts";
+export { harnessHome } from "./desktop/secrets.ts";
+export {
 	type ChatFn,
 	createOpenRouterChat,
 	discoverEvalSuite,
@@ -120,6 +139,11 @@ export {
 	runNamedEval,
 } from "./evals/runner.ts";
 export { initHost } from "./init.ts";
+export { listedMcpCatalog, type McpCatalogEntry } from "./integrations/catalog.ts";
+export { connectMcp } from "./integrations/connect.ts";
+export { withOAuthLoopback } from "./integrations/loopback.ts";
+export { openRemoteMcp } from "./integrations/remote-mcp.ts";
+export { listStoredConnections } from "./integrations/store.ts";
 export { extractMemories, parseExtractedFacts } from "./memory/extract.ts";
 export { isMemoryEnabled, readMemoryPrefs, writeMemoryPrefs } from "./memory/prefs.ts";
 export { formatMemoryList, formatRetrievedMemory } from "./memory/prompt.ts";
@@ -149,7 +173,12 @@ export {
 	WEBSITE_GENERATION_REGRESSION,
 } from "./observability/index.ts";
 export { CLI_NAME, PRODUCT_NAME } from "./product.ts";
-export { type CreateHarnessOptions, createHarness, type HarnessRuntime } from "./runtime.ts";
+export {
+	type CreateHarnessOptions,
+	createHarness,
+	type HarnessRuntime,
+	type HarnessTurnOptions,
+} from "./runtime.ts";
 export { authorSkillMarkdown, SKILL_AUTHOR_SYSTEM } from "./skills/author-skill.ts";
 export {
 	browseSkillCatalog,

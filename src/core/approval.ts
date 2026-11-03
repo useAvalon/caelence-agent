@@ -72,6 +72,13 @@ export interface ExecApprovalGateDeps {
 	 * prompt and can never deny. Must not throw; a throw or "ask" falls through to the prompt.
 	 */
 	assist?: (req: ApprovalRequest) => Promise<"allow" | "ask">;
+	/**
+	 * When set, only requests this returns true for go through the normal approval path. Every
+	 * other request runs without a prompt. Use it for a host that wants fewer prompts, such as
+	 * asking only before deletions. The `deny` policy and the host denylist still apply to the
+	 * requests it lets through.
+	 */
+	promptOnly?: (req: ApprovalRequest) => boolean;
 }
 
 async function promptAsk(deps: ExecApprovalGateDeps, req: ApprovalRequest): Promise<boolean> {
@@ -100,6 +107,7 @@ export function createExecApprovalGate(deps: ExecApprovalGateDeps): ApprovalGate
 	const always = deps.alwaysAllow ?? new Set<string>();
 	return {
 		async request(req) {
+			if (deps.promptOnly && !deps.promptOnly(req)) return true;
 			if (isFileWriteTool(req.toolName) && deps.resolveUploadEdit) {
 				const path = typeof req.input.path === "string" ? req.input.path : "";
 				const hit = deps.resolveUploadEdit(path);

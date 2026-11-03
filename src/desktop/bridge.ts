@@ -39,7 +39,7 @@ import { readMediaPrefs } from "../media/prefs.ts";
 import { isMemoryEnabled, writeMemoryPrefs } from "../memory/prefs.ts";
 import { deleteFact, isFactPinned, listFacts, pinFact, unpinFact } from "../memory/store.ts";
 import { PRODUCT_NAME } from "../product.ts";
-import { createHarness, type HarnessRuntime } from "../runtime.ts";
+import { type CreateHarnessOptions, createHarness, type HarnessRuntime } from "../runtime.ts";
 import {
 	buildSkillsPage,
 	cachedPopularSkills,
@@ -55,6 +55,7 @@ import {
 	skillNameFromCatalogId,
 } from "../skills/registry.ts";
 import { resolveUnderCwd, toProjectRel } from "../tools/paths.ts";
+import type { BridgeHost, BridgeHostContext, BridgeTurnPlan } from "./host.ts";
 import { openResolvedPath, resolveLocalPath } from "./open-local.ts";
 import { readPreviewCache, writePreviewCache } from "./preview-cache.ts";
 import { filePreviewKind, filePreviewMime } from "./preview-kind.ts";
@@ -101,6 +102,10 @@ export interface StartDesktopBridgeOptions {
 	port?: number;
 	token?: string;
 	harness?: HarnessRuntime;
+	/** Options for the harness the bridge creates. Ignored when `harness` is given. */
+	harnessOptions?: Omit<CreateHarnessOptions, "cwd">;
+	/** Extension points for a host app. See {@link BridgeHost}. */
+	extensions?: BridgeHost;
 	openUrl?: (url: string) => void;
 	openPath?: (path: string, reveal: boolean) => void;
 }
@@ -174,8 +179,11 @@ function saveProviderOAuth(body: Record<string, unknown>, kind: "google" | "micr
 	});
 }
 
-function chatMessages(session: Session | undefined) {
-	return session ? sessionTranscript(session) : [];
+function chatMessages(session: Session | undefined, shown: (text: string) => string = (t) => t) {
+	if (!session) return [];
+	return sessionTranscript(session).map((line) =>
+		line.kind === "user" || line.kind === "assistant" ? { ...line, text: shown(line.text) } : line,
+	);
 }
 
 function json(data: unknown, status = 200, extra?: HeadersInit): Response {
@@ -343,7 +351,11 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 	const token = options.token ?? randomBytes(24).toString("hex");
 	const openUrl = options.openUrl ?? openSystemBrowser;
 	if (!options.harness) applyStoredOpenRouterKey();
-	const harness = options.harness ?? (await createHarness({ cwd: options.cwd }));
+	const harness =
+		options.harness ?? (await createHarness({ ...options.harnessOptions, cwd: options.cwd }));
+	const ext: BridgeHost = options.extensions ?? {};
+	const hostCtx: BridgeHostContext = { harness };
+	const shown = (text: string): string => (ext.displayText ? ext.displayText(text) : text);
 	const openPath =
 		options.openPath ??
 		((path: string, reveal: boolean) => {
@@ -420,11 +432,16 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 	};
 
 	const route_get_models = async (_req: Request, _url: URL): Promise<Response> => {
-		return json({ items: modelPickerItems(harness.modelId, cachedLiveTargetNames()) });
+		const extra = (ext.modelItems?.(hostCtx) ?? []).filter(
+			(row) => !HARNESS_MODELS.some((model) => model.id === row.id),
+		);
+		return json({
+			items: [...extra, ...modelPickerItems(harness.modelId, cachedLiveTargetNames())],
+		});
 	};
 
 	const route_get_settings = async (_req: Request, _url: URL): Promise<Response> => {
-		return json(settingsPayload(harness));
+		return json({ ...settingsPayload(harness), ...ext.settings?.(hostCtx) });
 	};
 
 	const route_get_integrations = async (_req: Request, _url: URL): Promise<Response> => {
@@ -700,9 +717,12 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		if (typeof body.memoryEnabled === "boolean") {
 			writeMemoryPrefs({ enabled: body.memoryEnabled });
 		}
+		const hostError = await ext.applySettings?.(hostCtx, body);
+		if (hostError) return json({ error: hostError }, 400);
 		return json({
 			ok: true,
 			...settingsPayload(harness),
+			...ext.settings?.(hostCtx),
 			state: snapshot(harness, busy, title),
 		});
 	};
@@ -765,7 +785,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		return json({
 			ok: true,
 			state: snapshot(harness, busy, title),
-			messages: chatMessages(session),
+			messages: chatMessages(session, shown),
 		});
 	};
 
@@ -842,7 +862,7 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 			return json({
 				ok: true,
 				state: snapshot(harness, busy, title),
-				messages: chatMessages(session),
+				messages: chatMessages(session, shown),
 			});
 		}
 		return json({
@@ -890,7 +910,27 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		if (editUserTurn === undefined && incoming.trim().startsWith("/")) {
 			return runSlashTurn(incoming);
 		}
-		return startTurnStream(message, editUserTurn);
+		let plan: BridgeTurnPlan | undefined;
+		try {
+			plan = await ext.beforeTurn?.(hostCtx, { message, body });
+		} catch (err) {
+			return json({ error: errorMessage(err) || "Could not start the turn." }, 500);
+		}
+		if (plan?.reply !== undefined) return replyWithoutModel(plan.reply);
+		return startTurnStream(message, editUserTurn, plan);
+	};
+	/** Stream a host-written reply as a finished turn. Nothing is saved to the chat. */
+	const replyWithoutModel = (text: string): Response => {
+		const encoder = new TextEncoder();
+		const events: AgentEvent[] = [{ kind: "text_delta", text }, { kind: "completion" }];
+		const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+		return new Response(encoder.encode(body), {
+			headers: {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache",
+				...CORS_HEADERS,
+			},
+		});
 	};
 
 	const parseEditUserTurn = (value: unknown): number | undefined => {
@@ -909,7 +949,11 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 		return json({ outcome, state: snapshot(harness, busy, title) });
 	};
 
-	const startTurnStream = (message: string, editUserTurn?: number): Response => {
+	const startTurnStream = (
+		message: string,
+		editUserTurn?: number,
+		plan?: BridgeTurnPlan,
+	): Response => {
 		busy = true;
 		abort = new AbortController();
 		const encoder = new TextEncoder();
@@ -932,7 +976,14 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 					}
 				}, 4_000);
 				void harness
-					.runTurn(message, send, {
+					.runTurn(plan?.message ?? message, send, {
+						...plan?.options,
+						// What the user typed is what the chat stores, whatever the model was shown.
+						...(plan?.displayMessage !== undefined
+							? { displayMessage: plan.displayMessage }
+							: plan?.message !== undefined
+								? { displayMessage: message }
+								: {}),
 						signal: abort?.signal,
 						approvalAsk: (req: ApprovalRequest) => waitForApproval(pending, req),
 						...(editUserTurn !== undefined ? { editUserTurn } : {}),
@@ -1022,7 +1073,10 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 			if (readToken(req) !== token) {
 				return json({ error: `Unauthorized. Restart ${PRODUCT_NAME}.` }, 401);
 			}
-			const matched = bridgeRoutes[`${req.method} ${url.pathname}`];
+			const key = `${req.method} ${url.pathname}`;
+			const hostRoute = ext.routes?.[key];
+			if (hostRoute) return hostRoute(hostCtx, req, url);
+			const matched = bridgeRoutes[key];
 			if (!matched) return json({ error: "Not found." }, 404);
 			return matched(req, url);
 		},
