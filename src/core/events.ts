@@ -15,7 +15,13 @@ export type AgentEvent =
 			output?: string;
 			error?: string;
 	  }
-	| { kind: "approval_request"; callId: string; toolName: string; input: Record<string, unknown> }
+	| {
+			kind: "approval_request";
+			callId: string;
+			toolName: string;
+			input: Record<string, unknown>;
+			reason?: string;
+	  }
 	| { kind: "session_meta"; sessionId: string; title: string }
 	| {
 			kind: "usage";

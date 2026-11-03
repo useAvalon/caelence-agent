@@ -13,8 +13,24 @@ import { loadStdioMcpTools, type StdioMcpClientOptions } from "../core/stdio-mcp
 export interface BrowserConfig {
 	/** undefined: on only when a message has @browser. true: always on. false: never. */
 	enabled?: boolean;
-	/** Run Chrome without a window. Default is a visible window. */
+	/** Run Chrome without a window. Default is a visible window. Only for the separate browser. */
 	headless?: boolean;
+	/**
+	 * Which Chrome to drive. `separate` (default) starts its own signed-out Chrome with browser-use.
+	 * `chrome` attaches to the Chrome the user is running, where they are already signed in. That
+	 * needs the switch at chrome://inspect/#remote-debugging turned on once.
+	 */
+	backend?: "separate" | "chrome";
+	/**
+	 * Which browser the `chrome` backend attaches to. `chrome` is the default. `arc` reads Arc's
+	 * debugging port. Any other Chromium browser can be named by its user-data folder in
+	 * `userDataDir`.
+	 */
+	app?: "chrome" | "arc" | "brave" | "edge" | "chromium";
+	/** User-data folder of the browser to attach to, when `app` is not enough. */
+	userDataDir?: string;
+	/** Where to attach for the `chrome` backend. Wins over `app`. Mostly for tests. */
+	chromeEndpoint?: string;
 }
 
 /** Pinned to the line with `--mcp`. Unpinned `uvx` would follow upstream CLI rewrites. */
@@ -159,6 +175,15 @@ export function browserSetupHint(error: unknown): string {
 export interface BrowserSession {
 	tools: McpToolDefinition[];
 	close(): void;
+	/** Sites the user named, which the agent may open without asking. Own-Chrome backend only. */
+	trust?(hosts: readonly string[]): void;
+	/** Forget per-chat state, such as the agent's own tab. Own-Chrome backend only. */
+	reset?(): void;
+	/**
+	 * True when the browser could not be reached. The server is fixed to the address it started
+	 * with, so the runtime starts a new one on the next turn, after the user has set the browser up.
+	 */
+	stale?(): boolean;
 }
 
 export async function startBrowserTools(

@@ -169,3 +169,82 @@ describe("promptOnly", () => {
 		);
 	});
 });
+
+describe("confirm requests (a tool asked for a human on this call)", () => {
+	const confirmReq = {
+		callId: "c1",
+		toolName: "browser_click",
+		input: { element: "Post button" },
+		reason: "Click the Post button",
+	};
+
+	test("always ask, even under promptOnly, always-allow, and the auto policy", async () => {
+		for (const policy of ["prompt", "auto"] as const) {
+			let asked = 0;
+			let assisted = 0;
+			const gate = createExecApprovalGate({
+				policy,
+				alwaysAllow: new Set(["browser_click"]),
+				promptOnly: () => false,
+				assist: async () => {
+					assisted += 1;
+					return "allow";
+				},
+				ask: async () => {
+					asked += 1;
+					return false;
+				},
+			});
+			expect(await gate.request(confirmReq)).toBe(false);
+			expect(asked).toBe(1);
+			expect(assisted).toBe(0);
+		}
+	});
+
+	test("the deny policy refuses without asking", async () => {
+		let asked = 0;
+		const gate = createExecApprovalGate({
+			policy: "deny",
+			ask: async () => {
+				asked += 1;
+				return true;
+			},
+		});
+		expect(await gate.request(confirmReq)).toBe(false);
+		expect(asked).toBe(0);
+	});
+
+	test("with nobody to ask, the answer is no", async () => {
+		const gate = createExecApprovalGate({ policy: "prompt" });
+		expect(await gate.request(confirmReq)).toBe(false);
+	});
+
+	test("the reason reaches the approval card", async () => {
+		const events: unknown[] = [];
+		const gate = createExecApprovalGate({
+			policy: "prompt",
+			emit: (event) => events.push(event),
+			ask: async () => true,
+		});
+		expect(await gate.request(confirmReq)).toBe(true);
+		expect(events[0]).toMatchObject({
+			kind: "approval_request",
+			toolName: "browser_click",
+			reason: "Click the Post button",
+		});
+	});
+
+	test("a yes covers one call only", async () => {
+		let asked = 0;
+		const gate = createExecApprovalGate({
+			policy: "prompt",
+			ask: async () => {
+				asked += 1;
+				return true;
+			},
+		});
+		await gate.request(confirmReq);
+		await gate.request({ ...confirmReq, callId: "c2" });
+		expect(asked).toBe(2);
+	});
+});
