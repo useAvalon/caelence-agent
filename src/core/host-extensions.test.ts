@@ -269,7 +269,7 @@ describe("through createHarness", () => {
 				},
 			});
 			// @browser only in the host prefix: must NOT turn the browser on.
-			await harness.runTurn("[Berry says @browser]\n\nhello", () => undefined, {
+			await harness.runTurn("[Host says @browser]\n\nhello", () => undefined, {
 				displayMessage: "hello",
 			});
 			expect(started).toBe(0);
@@ -293,7 +293,7 @@ describe("through createHarness", () => {
 				cwd,
 				config: DEFAULT_CONFIG,
 				provider,
-				systemAppend: "You are Berry.",
+				systemAppend: "You are the host app.",
 				constructAgent: (input) => {
 					system = input.systemPrompt;
 					return {
@@ -312,7 +312,7 @@ describe("through createHarness", () => {
 				},
 				promptOnly: (req) => /\brm\b/.test(String(req.input.command ?? "")),
 			});
-			expect(system).toContain("You are Berry.");
+			expect(system).toContain("You are the host app.");
 			expect(asked).toBe(1);
 			harness.close();
 		} finally {
