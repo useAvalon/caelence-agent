@@ -1,5 +1,22 @@
 # @useavalon/caelence-agent
 
+## 0.5.0
+
+### Minor Changes
+
+- [#58](https://github.com/useAvalon/caelence-agent/pull/58) [`b1e67d1`](https://github.com/useAvalon/caelence-agent/commit/b1e67d1975a1d7b6415a84c6cc89847befe7c1d3) Thanks [@MadsHaerup](https://github.com/MadsHaerup)! - Background agents and pluggable memory.
+  
+  - `spawn_agent`, `await_agents` and `cancel_agent` start subagents that run while the main agent keeps working. Explore agents are read-only and can run on their own model (`subagents.exploreModel` or `HARNESS_EXPLORE_MODEL`). Hosts build the same tools with `createBackgroundAgents`.
+  - Memory sits behind a `MemoryStore` interface. Hosts pass their own store to `createHarness`, or implement a `MemoryBackend` and let `createMemoryStore` add validation and ranking. Recall is keyword-only by default; an `Embedder` adds semantic recall (`memory.embeddings` or `HARNESS_MEMORY_EMBEDDINGS`).
+  - The agent gets `memory_search` and `memory_save` when memory is on.
+  - `createLayeredMemoryStore` reads several stores as one (a project, then its workspace), writes to the narrowest, and moves a fact wider with `promote`. `synthesizeMemoryBrief` turns a scope's facts into a short brief for the prompt.
+
+- [#58](https://github.com/useAvalon/caelence-agent/pull/58) [`b1e67d1`](https://github.com/useAvalon/caelence-agent/commit/b1e67d1975a1d7b6415a84c6cc89847befe7c1d3) Thanks [@MadsHaerup](https://github.com/MadsHaerup)! - Status verbs. A turn starts with a `status` event carrying a few verbs ("Pondering", "Brewing") that the terminal UI and the desktop rotate through while the agent is thinking. The built-in list is on by default; `statusVerbs` in the config adds themed `categories` or `custom` verbs, or turns them off. Hosts that call `runTurn` pass `statusVerbs` with a pool from `resolveStatusVerbPool`.
+
+### Patch Changes
+
+- [#58](https://github.com/useAvalon/caelence-agent/pull/58) [`b1e67d1`](https://github.com/useAvalon/caelence-agent/commit/b1e67d1975a1d7b6415a84c6cc89847befe7c1d3) Thanks [@MadsHaerup](https://github.com/MadsHaerup)! - Langfuse tracing loads again in host apps. The OpenTelemetry packages are held to the 2.x line that `@langfuse/otel` supports; the 0.300 line needed a newer `@opentelemetry/api` than hosts had, so tracing stayed off even with both keys set. `createObservability` takes `onUnavailable`, which reports why tracing could not start instead of failing silently.
+
 ## 0.4.0
 
 ### Minor Changes
