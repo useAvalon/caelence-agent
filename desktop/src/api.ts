@@ -87,6 +87,7 @@ export type AgentEvent =
 	  }
 	| { kind: "approval_request"; callId: string; toolName: string; input: Record<string, unknown> }
 	| { kind: "session_meta"; sessionId: string; title: string }
+	| { kind: "status"; verbs: string[] }
 	| {
 			kind: "usage";
 			promptTokens: number;

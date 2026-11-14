@@ -1,5 +1,6 @@
 import type { MainModelProvider } from "../core/events.ts";
 import type { Session } from "../core/session.ts";
+import type { MemoryStore } from "./memory-store.ts";
 import { addFacts, type MemoryScope } from "./store.ts";
 
 export const MEMORY_EXTRACT_SYSTEM = [
@@ -65,6 +66,8 @@ export async function extractMemories(input: {
 	session: Session;
 	provider: MainModelProvider;
 	env?: Record<string, string | undefined>;
+	/** Where to keep the facts. Defaults to the facts files under `cwd` and the harness home. */
+	store?: MemoryStore;
 }): Promise<number> {
 	const source = turnMemorySource(input.session);
 	if (!source.trim()) return 0;
@@ -77,12 +80,10 @@ export async function extractMemories(input: {
 		if (event.type === "text_delta") raw += event.text;
 		if (event.type === "error") return 0;
 	}
-	return addFacts(
-		input.cwd,
-		parseExtractedFacts(raw).map((fact) => ({
-			...fact,
-			sessionId: input.session.id,
-		})),
-		input.env,
-	).length;
+	const facts = parseExtractedFacts(raw).map((fact) => ({
+		...fact,
+		sessionId: input.session.id,
+	}));
+	if (input.store) return (await input.store.add(facts)).length;
+	return addFacts(input.cwd, facts, input.env).length;
 }

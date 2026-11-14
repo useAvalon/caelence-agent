@@ -140,4 +140,20 @@ describe("thought fold", () => {
 		expect(blocks[1].entries[0]).toEqual({ type: "note", text: "I should look this up." });
 		expect(blocks[1].entries[1]?.type).toBe("tool");
 	});
+
+	test("the turn's verbs replace the plain phrases", () => {
+		const verbs = ["Brewing", "Baking", "Kneading"];
+		expect(liveStatusPhrases([], true, verbs)).toEqual(verbs);
+		const reading = liveStatusPhrases(
+			[
+				{ key: "t", type: "tool", name: "read_file", label: "Reading a.ts", status: "running" },
+			] as never,
+			false,
+			verbs,
+		);
+		expect(reading[0]).toBe("Reading a.ts");
+		expect(reading).toContain("Brewing");
+		expect(reading).toContain("Baking");
+		expect(reading).not.toContain("Thinking");
+	});
 });

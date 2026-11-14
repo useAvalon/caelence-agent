@@ -152,6 +152,7 @@ export function applyEvent(lines: StreamLine[], event: AgentEvent): StreamLine[]
 		case "usage":
 		case "completion":
 		case "approval_request":
+		case "status":
 			return lines;
 	}
 }

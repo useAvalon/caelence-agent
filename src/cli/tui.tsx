@@ -95,6 +95,7 @@ function applyEvent(lines: StreamLine[], event: AgentEvent): StreamLine[] {
 		case "usage":
 		case "completion":
 		case "approval_request":
+		case "status":
 			return lines;
 	}
 }
@@ -656,6 +657,7 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 	const [lines, setLines] = useState<StreamLine[]>([]);
 	const [turnTools, setTurnTools] = useState<TurnToolLine[]>([]);
 	const [progressTick, setProgressTick] = useState(0);
+	const [turnVerbs, setTurnVerbs] = useState<string[]>([]);
 	const [value, setValue] = useState("");
 	const [status, setStatus] = useState<UiStatus>("idle");
 	const [title, setTitle] = useState("New chat");
@@ -892,6 +894,10 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 					trimmed,
 					(event) => {
 						if (event.kind === "session_meta") setTitle(event.title);
+						if (event.kind === "status") {
+							setTurnVerbs(event.verbs);
+							return;
+						}
 						if (event.kind === "usage") setSpend(harness.spend);
 						if (event.kind === "completion") {
 							setTurnTools((tools) => {
@@ -960,6 +966,7 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 		assistantStarted,
 		tick: progressTick,
 		warmupSeed,
+		verbs: turnVerbs,
 	});
 	const showProgress = status === "running";
 	const chrome = tuiChromeRows({

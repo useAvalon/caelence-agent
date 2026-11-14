@@ -14,6 +14,8 @@ export interface MemoryFact {
 	scope: MemoryScope;
 	createdAt: string;
 	sessionId?: string;
+	/** Which layer a layered store read this from ("project", "workspace"). Never stored. */
+	layer?: string;
 }
 
 interface FactsFile {
@@ -62,6 +64,15 @@ export function userMemoryPath(env: Record<string, string | undefined> = process
 	return resolve(harnessHome(env), "memory", "facts.json");
 }
 
+/** Where one scope's facts are stored. */
+export function memoryPathForScope(
+	cwd: string,
+	scope: MemoryScope,
+	env: Record<string, string | undefined> = process.env,
+): string {
+	return scope === "user" ? userMemoryPath(env) : projectMemoryPath(cwd);
+}
+
 export function projectMemoryPath(cwd: string): string {
 	return resolve(cwd, ".harness", "memory", "facts.json");
 }
@@ -108,34 +119,55 @@ export function listFacts(
 	return [...readFactsFile(userMemoryPath(env)), ...readFactsFile(projectMemoryPath(cwd))];
 }
 
+/**
+ * Turn raw text into facts worth storing: trimmed, deduplicated against `known` hashes, and
+ * without secrets or noise. `known` gains the hash of every fact returned.
+ */
+export function prepareFacts(
+	known: Set<string>,
+	incoming: Array<{ text: string; scope?: MemoryScope; sessionId?: string }>,
+): MemoryFact[] {
+	const out: MemoryFact[] = [];
+	for (const item of incoming) {
+		const text = normalizeFactText(item.text);
+		if (text.length < 8 || text.length > 280 || isSecretLike(text)) continue;
+		const hash = factHash(text);
+		if (known.has(hash)) continue;
+		known.add(hash);
+		out.push({
+			id: newId("mem"),
+			hash,
+			text,
+			scope: item.scope === "user" ? "user" : "project",
+			createdAt: new Date().toISOString(),
+			...(item.sessionId ? { sessionId: item.sessionId } : {}),
+		});
+	}
+	return out;
+}
+
+/** Append prepared facts to the file for their scope. */
+export function insertFacts(
+	cwd: string,
+	facts: MemoryFact[],
+	env: Record<string, string | undefined> = process.env,
+): void {
+	for (const scope of ["user", "project"] as const) {
+		const rows = facts.filter((fact) => fact.scope === scope);
+		if (rows.length === 0) continue;
+		const path = pathForScope(cwd, scope, env);
+		writeFactsFile(path, [...readFactsFile(path), ...rows]);
+	}
+}
+
 export function addFacts(
 	cwd: string,
 	incoming: Array<{ text: string; scope?: MemoryScope; sessionId?: string }>,
 	env: Record<string, string | undefined> = process.env,
 ): MemoryFact[] {
 	const known = new Set(listFacts(cwd, env).map((fact) => fact.hash));
-	const added: MemoryFact[] = [];
-	for (const item of incoming) {
-		const text = normalizeFactText(item.text);
-		if (text.length < 8 || text.length > 280 || isSecretLike(text)) continue;
-		const hash = factHash(text);
-		if (known.has(hash)) continue;
-		const scope: MemoryScope = item.scope === "user" ? "user" : "project";
-		const fact: MemoryFact = {
-			id: newId("mem"),
-			hash,
-			text,
-			scope,
-			createdAt: new Date().toISOString(),
-			...(item.sessionId ? { sessionId: item.sessionId } : {}),
-		};
-		const path = pathForScope(cwd, scope, env);
-		const facts = readFactsFile(path);
-		facts.push(fact);
-		writeFactsFile(path, facts);
-		known.add(hash);
-		added.push(fact);
-	}
+	const added = prepareFacts(known, incoming);
+	insertFacts(cwd, added, env);
 	return added;
 }
 
@@ -181,13 +213,19 @@ export function searchFacts(
 	topK = 10,
 	env: Record<string, string | undefined> = process.env,
 ): MemoryFact[] {
-	const facts = listFacts(cwd, env);
-	if (facts.length === 0) return [];
+	return rankFacts(listFacts(cwd, env), query, topK);
+}
+
+/**
+ * Facts that match the query's words, best first. Undefined when the query has no usable words,
+ * which callers treat as "show the most recent".
+ */
+export function keywordHits<T extends MemoryFact>(facts: T[], query: string): T[] | undefined {
 	const tokens = tokenizeMemoryQuery(query);
-	if (tokens.length === 0) return takeRecentFacts(facts, topK);
+	if (tokens.length === 0) return undefined;
 	const needle = normalizeFactText(query).toLowerCase();
 	const leftover = leftoverNameBoosts(facts, query, tokens);
-	const hits = facts
+	return facts
 		.map((fact, index) => ({
 			fact,
 			score: scoreFact(fact, index, facts.length, tokens, needle) + (leftover.get(fact.id) ?? 0),
@@ -195,6 +233,18 @@ export function searchFacts(
 		.filter((row) => row.score > 1)
 		.sort((a, b) => b.score - a.score)
 		.map((row) => row.fact);
+}
+
+/** Pad a hit list to `topK` with recent user facts, as keyword recall always has. */
+export function completeHits<T extends MemoryFact>(hits: T[], all: T[], topK: number): T[] {
+	return fillMemoryHits(hits, all, topK);
+}
+
+/** Keyword recall over facts already in memory. */
+export function rankFacts<T extends MemoryFact>(facts: T[], query: string, topK = 10): T[] {
+	if (facts.length === 0) return [];
+	const hits = keywordHits(facts, query);
+	if (!hits) return takeRecentFacts(facts, topK);
 	return fillMemoryHits(hits, facts, topK);
 }
 
@@ -273,11 +323,11 @@ function scoreFact(
 	return score;
 }
 
-function takeRecentFacts(facts: MemoryFact[], topK: number): MemoryFact[] {
+function takeRecentFacts<T extends MemoryFact>(facts: T[], topK: number): T[] {
 	return facts.slice(-topK).reverse();
 }
 
-function fillMemoryHits(hits: MemoryFact[], all: MemoryFact[], topK: number): MemoryFact[] {
+function fillMemoryHits<T extends MemoryFact>(hits: T[], all: T[], topK: number): T[] {
 	const out = hits.slice(0, topK);
 	const seen = new Set(out.map((fact) => fact.id));
 	for (const fact of all.filter((item) => item.scope === "user").reverse()) {

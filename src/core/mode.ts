@@ -11,6 +11,11 @@ const READ_TOOLS = new Set([
 	"git_status",
 	"git_diff",
 	"git_log",
+	"memory_search",
+	// Background agents are limited to read-only explorers outside agent mode.
+	"spawn_agent",
+	"await_agents",
+	"cancel_agent",
 ]);
 
 const PLAN_TOOLS = new Set([...READ_TOOLS, "todo_write"]);
