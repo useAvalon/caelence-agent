@@ -63,15 +63,17 @@ import { type ChatFn, createOpenRouterChat } from "./evals/runner.ts";
 import { buildRemoteMcpTools } from "./integrations/remote-mcp.ts";
 import { linkedMcpSources } from "./integrations/store.ts";
 import { listUserMcpServers, userMcpToolPrefix } from "./mcp/user-servers.ts";
+import { createOpenAICompatEmbedder } from "./memory/embeddings.ts";
 import { extractMemories, turnMemorySource } from "./memory/extract.ts";
+import { createFileMemoryStore, type MemoryStore } from "./memory/memory-store.ts";
 import { isMemoryEnabled } from "./memory/prefs.ts";
 import { formatRetrievedMemory } from "./memory/prompt.ts";
-import { searchFacts } from "./memory/store.ts";
 import { createObservability } from "./observability/create.ts";
 import { noopObservability } from "./observability/noop.ts";
 import { harnessPromptRecords, syncPrompts } from "./observability/prompts.ts";
 import type { Observability } from "./observability/types.ts";
 import { resolveAgentVersion } from "./observability/version.ts";
+import { PRODUCT_NAME } from "./product.ts";
 import { authorSkillMarkdown } from "./skills/author-skill.ts";
 import { createHostSkill, parseSkillNewArgs } from "./skills/create-skill.ts";
 import {
@@ -96,8 +98,18 @@ import {
 	skillNameFromCatalogId,
 } from "./skills/registry.ts";
 import { userSkillsDir } from "./skills/user-dir.ts";
+import { resolveStatusVerbPool } from "./status/categories.ts";
+import {
+	BACKGROUND_AGENTS_PROMPT,
+	type BackgroundAgents,
+	createBackgroundAgents,
+	EXPLORE_INSTRUCTIONS,
+	readOnlyTools,
+	type SubagentKind,
+} from "./tools/background.ts";
 import { createGitTools } from "./tools/git.ts";
 import { createLocalTools } from "./tools/local.ts";
+import { createMemoryTools } from "./tools/memory.ts";
 import { createReadSkillTool } from "./tools/read-skill.ts";
 import { createTaskTool } from "./tools/subagent.ts";
 import { createMemoryTodoStore, createTodoTool } from "./tools/todo.ts";
@@ -190,6 +202,11 @@ export interface CreateHarnessOptions {
 	approvalPolicy?: ExecApprovalPolicy;
 	extraTools?: McpToolDefinition[];
 	observability?: Observability;
+	/**
+	 * Where cross-session memory is kept. A host passes its own store (a database scoped to one
+	 * user or project). Defaults to the facts files under `cwd` and the harness home.
+	 */
+	memory?: MemoryStore;
 	mode?: AgentMode;
 	/** Load one-click MCP connections from ~/.harness. Default on unless a test provider is passed. */
 	loadIntegrations?: boolean;
@@ -392,6 +409,32 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	let activeEmit: AgentEventEmitter = () => undefined;
 	let activeApproval: ApprovalGate | undefined;
 	const subagentsEnabled = config.subagents?.enabled !== false;
+	const statusVerbPool = resolveStatusVerbPool(config.statusVerbs).pool;
+	// Semantic recall sends fact text to the embeddings provider, so it is off until asked for.
+	const embeddingModel =
+		process.env.HARNESS_MEMORY_EMBEDDINGS?.trim() ||
+		(config.memory?.embeddings?.enabled ? config.memory.embeddings.model?.trim() || "default" : "");
+	const memoryStore: MemoryStore =
+		options.memory ??
+		createFileMemoryStore({
+			cwd,
+			...(embeddingModel && embeddingModel !== "0" && embeddingModel !== "off"
+				? {
+						embedder: createOpenAICompatEmbedder({
+							apiKey: () => apiKey,
+							baseUrl: or.baseUrl,
+							...(embeddingModel === "default" || embeddingModel === "1"
+								? {}
+								: { model: embeddingModel }),
+						}),
+					}
+				: {}),
+		});
+	/** A host that brings its own store has asked for memory; otherwise the user's setting decides. */
+	const memoryEnabled = (): boolean =>
+		options.memory
+			? config.memory?.enabled !== false
+			: isMemoryEnabled({ configEnabled: config.memory?.enabled });
 
 	const baseTools = (): McpToolDefinition[] =>
 		filterToolsForMode(mode, [
@@ -405,12 +448,26 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			createReadSkillTool(skills),
 		]);
 
-	const nestedSystem = (extraSystem: string): string =>
+	/** The model a subagent runs on. Explore agents can use a smaller, faster one than the chat. */
+	const subagentModel = (kind: SubagentKind): string => {
+		const general = process.env.HARNESS_SUBAGENT_MODEL?.trim() || config.subagents?.model?.trim();
+		if (kind === "explore") {
+			return (
+				process.env.HARNESS_EXPLORE_MODEL?.trim() ||
+				config.subagents?.exploreModel?.trim() ||
+				general ||
+				modelId
+			);
+		}
+		return general || modelId;
+	};
+
+	const nestedSystem = (extraSystem: string, kind: SubagentKind = "general"): string =>
 		[
 			buildSystemPrompt({
 				name: `${config.name} subagent`,
 				cwd,
-				projectInstructions: SUBAGENT_INSTRUCTIONS,
+				projectInstructions: kind === "explore" ? EXPLORE_INSTRUCTIONS : SUBAGENT_INSTRUCTIONS,
 				skillCatalog: skillCatalogPrompt(skills),
 				mode,
 			}),
@@ -606,42 +663,90 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			activeEmit = emit;
 			activeApproval = approval;
 			await resolveBrowser(userText, turnOptions?.browser === true, turnOptions?.trustedHosts);
-			const tools = baseTools();
+			const memoryOn = memoryEnabled();
+			let tools = baseTools();
+			if (memoryOn) {
+				tools.push(
+					...filterToolsForMode(
+						mode,
+						createMemoryTools(memoryStore, { sessionId: () => activeSessionId }),
+					),
+				);
+			}
+			/** One nested turn for a subagent. Explore agents get the read-only tools and their own model. */
+			const runNested = async (input: {
+				prompt: string;
+				kind: SubagentKind;
+				extraSystem: string;
+				emit: AgentEventEmitter;
+				signal?: AbortSignal;
+			}): Promise<void> => {
+				const nestedModel = subagentModel(input.kind);
+				const nestedDeps: RunTurnDeps = {
+					cwd,
+					name: `${config.name} subagent`,
+					systemPrompt: nestedSystem(input.extraSystem, input.kind),
+					tools: input.kind === "explore" ? readOnlyTools(baseTools()) : baseTools(),
+					approval: activeApproval ?? approval,
+					store: createMemorySessionStore(),
+					provider:
+						options.provider || nestedModel === modelId
+							? provider
+							: makeProvider(nestedModel, `${PRODUCT_NAME} subagent`),
+					constructAgent,
+					observability,
+					traceName: input.kind === "explore" ? "explore_subagent" : "subagent",
+					requestType: "chat",
+					agentVersion,
+					hooks,
+					mode,
+				};
+				await runTurn(nestedDeps, { message: input.prompt }, input.emit, {
+					signal: input.signal,
+				});
+			};
 			if (subagentsEnabled && toolsAllowedInMode(mode, "task")) {
 				tools.push(
 					createTaskTool({
 						skills,
 						parentEmit: () => activeEmit,
-						async run({ prompt, extraSystem, emit: nestedEmit }) {
-							const nestedDeps: RunTurnDeps = {
-								cwd,
-								name: `${config.name} subagent`,
-								systemPrompt: nestedSystem(extraSystem),
-								tools: baseTools(),
-								approval: activeApproval ?? approval,
-								store: createMemorySessionStore(),
-								provider,
-								constructAgent,
-								resolveProvider: options.provider ? undefined : (id) => makeProvider(id),
-								observability,
-								traceName: "subagent",
-								requestType: "chat",
-								agentVersion,
-								hooks,
-								mode,
-							};
-							await runTurn(nestedDeps, { message: prompt, model: modelId }, nestedEmit, {
+						run: ({ prompt, extraSystem, emit: nestedEmit }) =>
+							runNested({
+								prompt,
+								kind: "general",
+								extraSystem,
+								emit: nestedEmit,
 								signal: turnOptions?.signal,
-							});
-						},
+							}),
 					}),
 				);
 			}
-			const memoryOn = isMemoryEnabled({ configEnabled: config.memory?.enabled });
+			// Explore agents only read, so they are offered in ask and plan mode too.
+			let background: BackgroundAgents | undefined;
+			if (subagentsEnabled && config.subagents?.background !== false) {
+				background = createBackgroundAgents({
+					skills,
+					parentEmit: () => activeEmit,
+					kinds: mode === "agent" ? ["explore", "general"] : ["explore"],
+					maxConcurrent: config.subagents?.maxConcurrent,
+					maxAgents: config.subagents?.maxPerTurn,
+					signal: turnOptions?.signal,
+					run: ({ prompt, kind, extraSystem, emit: nestedEmit, signal }) =>
+						runNested({ prompt, kind, extraSystem, emit: nestedEmit, signal }),
+				});
+				tools = [
+					...tools.map((tool) => background?.withNotices(tool) ?? tool),
+					...background.tools,
+				];
+			}
 			const deps: RunTurnDeps = {
 				cwd,
 				name: config.name,
-				systemPrompt: [systemPromptWithMemory(systemPrompt, cwd, userText, memoryOn), browserNote]
+				systemPrompt: [
+					await systemPromptWithMemory(systemPrompt, memoryStore, userText, memoryOn),
+					background ? BACKGROUND_AGENTS_PROMPT : "",
+					browserNote,
+				]
 					.filter(Boolean)
 					.join("\n\n"),
 				tools,
@@ -660,6 +765,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				decisions,
 				shortcut: options.shortcut,
 				intercept: options.intercept,
+				...(statusVerbPool.length > 0
+					? { statusVerbs: { pool: statusVerbPool, perTurn: config.statusVerbs?.perTurn } }
+					: {}),
 			};
 			const capture: AgentEventEmitter = (event) => {
 				if (event.kind === "usage") {
@@ -690,10 +798,10 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 				},
 				capture,
 				{ signal: turnOptions?.signal },
-			);
+			).finally(() => background?.close());
 			// Assign the variable, not the setter: a new chat's first turn must keep the browser on.
 			if (session) activeSessionId = session.id;
-			scheduleMemoryExtract(memoryOn, cwd, session, provider, decisions);
+			scheduleMemoryExtract(memoryOn, cwd, memoryStore, session, provider, decisions);
 			return session;
 		},
 		close() {
@@ -708,14 +816,15 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	return runtime;
 }
 
-function systemPromptWithMemory(
+async function systemPromptWithMemory(
 	base: string,
-	cwd: string,
+	store: MemoryStore,
 	message: string,
 	enabled: boolean,
-): string {
+): Promise<string> {
 	if (!enabled) return base;
-	const block = formatRetrievedMemory(searchFacts(cwd, message));
+	const facts = await store.search(message).catch(() => []);
+	const block = formatRetrievedMemory(facts);
 	if (!block) return base;
 	return `${base}\n\n## Memory\n${block}`;
 }
@@ -723,6 +832,7 @@ function systemPromptWithMemory(
 function scheduleMemoryExtract(
 	enabled: boolean,
 	cwd: string,
+	store: MemoryStore,
 	session: Session | undefined,
 	provider: MainModelProvider,
 	decisions?: ResolvedDecisions,
@@ -733,6 +843,6 @@ function scheduleMemoryExtract(
 			const source = turnMemorySource(session);
 			if (!source.trim() || !(await turnHasDurableFact(decisions, source))) return;
 		}
-		await extractMemories({ cwd, session, provider });
+		await extractMemories({ cwd, session, provider, store });
 	})().catch(() => undefined);
 }

@@ -23,6 +23,11 @@ export type AgentEvent =
 			reason?: string;
 	  }
 	| { kind: "session_meta"; sessionId: string; title: string }
+	/**
+	 * Sent once at the start of a turn: the verbs a UI rotates through while the agent is thinking
+	 * ("Pondering", "Brewing"). A UI that ignores it shows its own plain label.
+	 */
+	| { kind: "status"; verbs: string[] }
 	| {
 			kind: "usage";
 			promptTokens: number;

@@ -151,7 +151,42 @@ export { connectMcp } from "./integrations/connect.ts";
 export { withOAuthLoopback } from "./integrations/loopback.ts";
 export { openRemoteMcp } from "./integrations/remote-mcp.ts";
 export { listStoredConnections } from "./integrations/store.ts";
-export { extractMemories, parseExtractedFacts } from "./memory/extract.ts";
+export {
+	DEFAULT_BRIEF_WORDS,
+	formatMemoryBriefs,
+	memoryBriefSystem,
+	synthesizeMemoryBrief,
+} from "./memory/brief.ts";
+export {
+	cosineSimilarity,
+	createOpenAICompatEmbedder,
+	DEFAULT_EMBEDDING_MODEL,
+	type Embedder,
+	fuseRankings,
+} from "./memory/embeddings.ts";
+export {
+	extractMemories,
+	MEMORY_EXTRACT_SYSTEM,
+	parseExtractedFacts,
+	turnMemorySource,
+} from "./memory/extract.ts";
+export {
+	createLayeredMemoryStore,
+	type LayeredMemoryStore,
+	type MemoryLayer,
+} from "./memory/layered.ts";
+export {
+	type CreateMemoryStoreOptions,
+	createFileMemoryBackend,
+	createFileMemoryStore,
+	createInMemoryMemoryBackend,
+	createMemoryStore,
+	type MemoryBackend,
+	type MemoryEmbeddingRow,
+	type MemoryRecord,
+	type MemoryStore,
+	type NewMemoryFact,
+} from "./memory/memory-store.ts";
 export { isMemoryEnabled, readMemoryPrefs, writeMemoryPrefs } from "./memory/prefs.ts";
 export { formatMemoryList, formatRetrievedMemory } from "./memory/prompt.ts";
 export {
@@ -161,6 +196,8 @@ export {
 	type MemoryFact,
 	type MemoryScope,
 	pinFact,
+	prepareFacts,
+	rankFacts,
 	searchFacts,
 	unpinFact,
 } from "./memory/store.ts";
@@ -242,8 +279,35 @@ export {
 } from "./skills/registry.ts";
 export { parseSkillCommand, SKILL_COMMAND_USAGE, SKILL_FIND_HINT } from "./skills/skill-command.ts";
 export { userSkillsDir } from "./skills/user-dir.ts";
+export {
+	resolveStatusVerbPool,
+	statusVerbCategories,
+	statusVerbCategoryNames,
+} from "./status/categories.ts";
+export {
+	DEFAULT_STATUS_VERBS,
+	DEFAULT_STATUS_VERBS_PER_TURN,
+	FALLBACK_STATUS_VERB,
+	pickStatusVerbs,
+	type StatusVerbsConfig,
+	seededRandom,
+	statusVerbAt,
+} from "./status/status-verbs.ts";
+export {
+	BACKGROUND_AGENTS_PROMPT,
+	type BackgroundAgentRunInput,
+	type BackgroundAgentSnapshot,
+	type BackgroundAgentStatus,
+	type BackgroundAgents,
+	type BackgroundAgentsOptions,
+	createBackgroundAgents,
+	EXPLORE_INSTRUCTIONS,
+	readOnlyTools,
+	type SubagentKind,
+} from "./tools/background.ts";
 export { createGitTools } from "./tools/git.ts";
 export { createLocalTools } from "./tools/local.ts";
+export { createMemoryTools } from "./tools/memory.ts";
 export { PathEscapeError, resolveUnderCwd } from "./tools/paths.ts";
 export { createReadSkillTool } from "./tools/read-skill.ts";
 export { createTaskTool } from "./tools/subagent.ts";

@@ -3,6 +3,7 @@ import type { ShortcutPlanner } from "../decisions/shortcuts.ts";
 import { noopObservability } from "../observability/noop.ts";
 import { sanitize } from "../observability/sanitize.ts";
 import type { Observability } from "../observability/types.ts";
+import { pickStatusVerbs } from "../status/status-verbs.ts";
 import type { ApprovalGate } from "./approval.ts";
 import { isFileWriteTool, isRiskyToolCall } from "./approval.ts";
 import { errorMessage, isAbortError } from "./errors.ts";
@@ -104,6 +105,11 @@ export interface RunTurnDeps {
 	shortcut?: ShortcutPlanner;
 	/** Host handler that can answer a whole turn without the chat model. */
 	intercept?: TurnInterceptor;
+	/**
+	 * Verbs to pick from for this turn's `status` event. Leave it out for a nested turn, or to
+	 * send no verbs at all.
+	 */
+	statusVerbs?: { pool: readonly string[]; perTurn?: number };
 }
 
 export async function runTurn(
@@ -137,6 +143,11 @@ export async function runTurn(
 			return undefined;
 		}
 		session = undefined;
+	}
+
+	if (deps.statusVerbs && deps.statusVerbs.pool.length > 0) {
+		const verbs = pickStatusVerbs(deps.statusVerbs.pool, deps.statusVerbs.perTurn);
+		if (verbs.length > 0) emit({ kind: "status", verbs });
 	}
 
 	const obs = deps.observability ?? noopObservability;

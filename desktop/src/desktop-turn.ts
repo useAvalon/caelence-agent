@@ -23,6 +23,7 @@ import {
 	type StreamLine,
 	truncateAfterUserTurn,
 } from "./stream";
+import { setTurnVerbs } from "./turn-verbs";
 
 export function applyDesktopTurnEvent(
 	event: AgentEvent,
@@ -41,6 +42,12 @@ export function applyDesktopTurnEvent(
 			input: event.input,
 		});
 		setStatus("approval");
+	}
+	if (event.kind === "status") {
+		setTurnVerbs(event.verbs);
+		// A new array so the thinking label renders again with the verbs.
+		setLines((prev) => [...prev]);
+		return false;
 	}
 	setLines((prev) => applyEvent(prev, event));
 	return event.kind === "completion" || event.kind === "error";

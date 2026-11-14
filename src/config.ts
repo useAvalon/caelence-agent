@@ -7,6 +7,7 @@ import type { ExecApprovalPolicy } from "./core/approval.ts";
 import type { HookConfig } from "./core/hooks.ts";
 import type { AgentMode } from "./core/mode.ts";
 import type { HarnessDecisionsConfig } from "./decisions/config.ts";
+import type { StatusVerbsConfig } from "./status/status-verbs.ts";
 
 export interface ExtraMcpServerConfig {
 	command: string;
@@ -24,10 +25,38 @@ export interface HarnessConfig {
 	tools: { exec: { approval: ExecApprovalPolicy } };
 	mcp: ExtraMcpServerConfig[];
 	openrouterBaseUrl?: string;
-	subagents?: { enabled?: boolean };
+	subagents?: {
+		enabled?: boolean;
+		/** Background agents (spawn_agent / await_agents). On unless this is false. */
+		background?: boolean;
+		/** Model for subagents. Defaults to the chat model. HARNESS_SUBAGENT_MODEL overrides it. */
+		model?: string;
+		/**
+		 * Model for read-only explore agents. A small fast one makes search fan-out quick and cheap.
+		 * Defaults to `model`. HARNESS_EXPLORE_MODEL overrides it.
+		 */
+		exploreModel?: string;
+		/** Background agents running at once (default 4). */
+		maxConcurrent?: number;
+		/** Background agents one turn may start (default 12). */
+		maxPerTurn?: number;
+	};
 	observability?: { enabled?: boolean };
 	/** Cross-session memory. Off unless this is true or ~/.harness/memory.json enables it. */
-	memory?: { enabled?: boolean };
+	memory?: {
+		enabled?: boolean;
+		/**
+		 * Semantic recall. Fact text is sent to the embeddings endpoint of the OpenRouter base URL,
+		 * so this is off unless enabled here or HARNESS_MEMORY_EMBEDDINGS names a model.
+		 */
+		embeddings?: { enabled?: boolean; model?: string };
+	};
+	/**
+	 * The verbs shown while the agent is thinking ("Pondering", "Brewing"). The built-in list is
+	 * on by default; add themed `categories` or your own `custom` ones, or set `enabled: false`
+	 * for a plain "Thinking".
+	 */
+	statusVerbs?: StatusVerbsConfig;
 	/** Default agent. ask = read only. plan = read + todos. */
 	mode?: AgentMode;
 	hooks?: HookConfig[];

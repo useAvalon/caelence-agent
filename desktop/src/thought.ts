@@ -2,6 +2,7 @@ import { pipelineProgress } from "./pipeline";
 import { isPlatformTool } from "./platform";
 import type { StreamLine } from "./stream";
 import { eventCountSuffix } from "./tool-label";
+import { turnVerbs } from "./turn-verbs";
 
 export type ToolLine = Extract<StreamLine, { type: "tool" }>;
 
@@ -66,8 +67,16 @@ export function warmupHeadline(seed: number): string {
 	return WARMUP_PHRASES[Math.abs(seed) % WARMUP_PHRASES.length] ?? "Thinking";
 }
 
-export function liveStatusPhrases(tools: ToolLine[], warmup = false): string[] {
-	if (warmup || tools.length === 0) return [...WARMUP_PHRASES];
+/**
+ * The phrases the thinking label rotates through. `verbs` are the turn's verbs from its `status`
+ * event; without them the plain phrases are used.
+ */
+export function liveStatusPhrases(
+	tools: ToolLine[],
+	warmup = false,
+	verbs: readonly string[] = turnVerbs(),
+): string[] {
+	if (warmup || tools.length === 0) return verbs.length > 0 ? [...verbs] : [...WARMUP_PHRASES];
 	const pipe = pipelineProgress(tools);
 	const out: string[] = [];
 	if (pipe) {
@@ -86,8 +95,10 @@ export function liveStatusPhrases(tools: ToolLine[], warmup = false): string[] {
 		}
 		if (isWriteTool(current)) pushPhrase(out, "Editing");
 	}
-	pushPhrase(out, "Thinking");
-	pushPhrase(out, "Looking this over");
+	// The tool label stays first; a couple of verbs fill the pauses between steps.
+	const [first, second] = verbs;
+	pushPhrase(out, first ?? "Thinking");
+	pushPhrase(out, second ?? "Looking this over");
 	return out;
 }
 

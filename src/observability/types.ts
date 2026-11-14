@@ -92,6 +92,11 @@ export interface CreateObservabilityOptions {
 	agentVersion?: string;
 	environment?: string;
 	env?: Record<string, string | undefined>;
+	/**
+	 * Called once when the Langfuse keys are set but tracing could not start, with the reason.
+	 * Without it the failure is silent and the caller gets the no-op observer.
+	 */
+	onUnavailable?: (reason: string) => void;
 }
 
 export const FEEDBACK_CATEGORIES = [

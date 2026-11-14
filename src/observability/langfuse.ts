@@ -85,6 +85,11 @@ function observationHandle(
 	};
 }
 
+function reportUnavailable(options: CreateObservabilityOptions, what: string, err: unknown): void {
+	const detail = err instanceof Error ? err.message : String(err);
+	safe(() => options.onUnavailable?.(`${what}: ${detail.slice(0, 300)}`));
+}
+
 export async function tryCreateLangfuseObservability(
 	options: CreateObservabilityOptions = {},
 ): Promise<Observability | undefined> {
@@ -112,7 +117,8 @@ export async function tryCreateLangfuseObservability(
 		LangfuseSpanProcessor = otelMod.LangfuseSpanProcessor;
 		NodeSDK = sdkMod.NodeSDK;
 		LangfuseClient = clientMod.LangfuseClient;
-	} catch {
+	} catch (err) {
+		reportUnavailable(options, "the Langfuse or OpenTelemetry packages did not load", err);
 		return undefined;
 	}
 
@@ -131,7 +137,8 @@ export async function tryCreateLangfuseObservability(
 		const sdk = new NodeSDK({ spanProcessors: [processor] });
 		sdk.start();
 		otel = sdk;
-	} catch {
+	} catch (err) {
+		reportUnavailable(options, "the OpenTelemetry SDK did not start", err);
 		return undefined;
 	}
 

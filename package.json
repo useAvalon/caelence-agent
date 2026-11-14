@@ -26,7 +26,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./cli": "./src/cli/main.ts",
-    "./observability": "./src/observability/index.ts"
+    "./observability": "./src/observability/index.ts",
+    "./status-verbs": "./src/status/status-verbs.ts"
   },
   "files": [
     "bin",
@@ -38,7 +39,7 @@
   ],
   "scripts": {
     "start": "bun bin/harness.ts",
-    "test": "bun test src/browser src/decisions src/core src/tools src/skills src/evals src/cli src/observability src/desktop src/integrations src/media src/memory src/init.test.ts src/runtime.test.ts desktop/src/rich-text.test.ts desktop/src/stream.test.ts desktop/src/dictation.test.ts desktop/src/thought.test.ts desktop/src/queue.test.ts desktop/src/composer-files.test.ts desktop/src/tool-label.test.ts desktop/src/reply-sources.test.ts desktop/src/pipeline.test.ts desktop/src/preview-render.test.ts desktop/src/session-search.test.ts desktop/src/session-select.test.ts",
+    "test": "bun test src/status src/browser src/decisions src/core src/tools src/skills src/evals src/cli src/observability src/desktop src/integrations src/media src/memory src/init.test.ts src/runtime.test.ts desktop/src/rich-text.test.ts desktop/src/stream.test.ts desktop/src/dictation.test.ts desktop/src/thought.test.ts desktop/src/queue.test.ts desktop/src/composer-files.test.ts desktop/src/tool-label.test.ts desktop/src/reply-sources.test.ts desktop/src/pipeline.test.ts desktop/src/preview-render.test.ts desktop/src/session-search.test.ts desktop/src/session-select.test.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "lint": "biome ci .",
     "format": "biome format --write .",
@@ -66,7 +67,9 @@
     "@langfuse/client": "^5.11.1",
     "@langfuse/otel": "^5.11.1",
     "@langfuse/tracing": "^5.11.1",
-    "@opentelemetry/sdk-node": "^0.300.0"
+    "@opentelemetry/exporter-trace-otlp-http": ">=0.202.0 <0.300.0",
+    "@opentelemetry/otlp-exporter-base": ">=0.202.0 <0.300.0",
+    "@opentelemetry/sdk-node": ">=0.202.0 <0.300.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",

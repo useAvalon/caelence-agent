@@ -234,9 +234,32 @@ Because the agent acts as you on every site you are signed in to, this backend i
 
 These checks stand in front of a model. They are not a security boundary, and a page can still try to talk the agent into something. Playwright is pinned to 0.0.83.
 
+## Background agents
+
+The agent can start subagents that run while it keeps working. `spawn_agent` returns an id at once, `await_agents` collects the reports, and `cancel_agent` stops one. Explore agents get only the tools that declare themselves read-only, and are the default; in ask and plan mode they are the only kind. An agent never outlives the turn that started it.
+
+```ts
+export default {
+	subagents: {
+		exploreModel: "z-ai/glm-5.2", // a small fast model for search; defaults to the chat model
+		maxConcurrent: 4,
+		maxPerTurn: 12,
+		// background: false turns spawn_agent off and keeps the blocking `task` tool
+	},
+};
+```
+
+`HARNESS_EXPLORE_MODEL` and `HARNESS_SUBAGENT_MODEL` override the models. A host that calls `runTurn` itself builds the same tools with `createBackgroundAgents`.
+
 ## Memory
 
 Turn it on from the Memory tab or `/memory on` if you want later chats to keep prefs and project decisions. After a turn the model adds a few of those to `~/.harness/memory` and `.harness/memory`, and the next session only sees the ones that fit what you asked. `/memory` lists them, `/memory delete 1` removes a line, and `/memory pin 1` copies it into `AGENTS.md`.
+
+Recall matches on words by default. Set `memory.embeddings.enabled` (or `HARNESS_MEMORY_EMBEDDINGS=<model>`) to also match on meaning; fact text is then sent to the embeddings endpoint of your OpenRouter base URL, and the vectors are kept in `vectors.json` beside the facts. When memory is on the agent also gets `memory_search` and `memory_save`.
+
+A host keeps memory in its own database by passing a `MemoryStore` to `createHarness`, or by implementing `MemoryBackend` (load, insert, remove, and optionally a vector index) and wrapping it with `createMemoryStore`.
+
+For shared context across a team, `createLayeredMemoryStore` reads several stores as one, narrowest first (a project, then its workspace). The agent writes to the narrowest layer only; `promote` moves a fact wider, which a host does when a person asks. `synthesizeMemoryBrief` turns a scope's facts into a short brief to put in the prompt.
 
 ## Library
 

@@ -1,3 +1,4 @@
+import { statusVerbAt } from "../status/status-verbs.ts";
 import { clipLabel } from "./tui-layout.ts";
 import type { TurnToolLine } from "./tui-stream.ts";
 
@@ -5,7 +6,15 @@ export const WARMUP_PHRASES = ["Thinking", "Looking this over", "Working it out"
 
 const TICK_FRAMES = ["", ".", "..", "..."] as const;
 
-export function warmupHeadline(seed: number): string {
+/** Progress ticks a verb stays up before the next one. A tick is 450 ms, so about 3 seconds. */
+const TICKS_PER_VERB = 7;
+
+/**
+ * What to show while the agent is thinking. With the turn's verbs it walks through them; without
+ * (verbs turned off, or the event has not arrived) it is one of the plain phrases.
+ */
+export function warmupHeadline(seed: number, verbs: readonly string[] = [], tick = 0): string {
+	if (verbs.length > 0) return statusVerbAt(verbs, tick, TICKS_PER_VERB);
 	return WARMUP_PHRASES[Math.abs(seed) % WARMUP_PHRASES.length] ?? "Thinking";
 }
 
@@ -37,6 +46,8 @@ export function turnProgressLabel(input: {
 	assistantStarted: boolean;
 	tick: number;
 	warmupSeed: number;
+	/** The turn's verbs from its `status` event. */
+	verbs?: readonly string[];
 }): string {
 	if (input.assistantStarted) {
 		const frame = TICK_FRAMES[input.tick % TICK_FRAMES.length] ?? "";
@@ -47,9 +58,10 @@ export function turnProgressLabel(input: {
 		const frame = TICK_FRAMES[input.tick % TICK_FRAMES.length] ?? "";
 		return `${toolActivityLabel(running)}${frame}`;
 	}
+	const headline = warmupHeadline(input.warmupSeed, input.verbs, input.tick);
 	if (input.tools.length > 0) {
-		return `${warmupHeadline(input.warmupSeed)}…`;
+		return `${headline}…`;
 	}
 	const frame = TICK_FRAMES[input.tick % TICK_FRAMES.length] ?? "";
-	return `${warmupHeadline(input.warmupSeed)}${frame}`;
+	return `${headline}${frame}`;
 }

@@ -17,6 +17,12 @@ updates:
       - dependency-name: "*"
         update-types:
           - version-update:semver-major
+      # @langfuse/otel needs the OpenTelemetry 2.x line (0.2xx packages). The 0.300 line needs
+      # @opentelemetry/api 1.10, which hosts on the 2.x line do not have, and tracing then fails
+      # to load. Lift this when @langfuse/otel supports OpenTelemetry 3.
+      - dependency-name: "@opentelemetry/*"
+        versions:
+          - ">=0.300.0"
     labels:
       - dependencies
     commit-message:
