@@ -34,6 +34,11 @@ import {
 	toolsAllowedInMode,
 } from "./core/mode.ts";
 import {
+	parseReasoningEffort,
+	type ReasoningEffort,
+	resolveReasoningEffort,
+} from "./core/reasoning.ts";
+import {
 	buildSystemPrompt,
 	defaultSummarizer,
 	type RunTurnDeps,
@@ -159,6 +164,7 @@ export interface HarnessRuntime {
 	systemPrompt: string;
 	modelId: string;
 	mode: AgentMode;
+	reasoningEffort: ReasoningEffort;
 	activeSessionId?: string;
 	/** True when the browser tools are on for the current chat, by `@browser`, a turn option, or config. */
 	readonly browserActive: boolean;
@@ -172,6 +178,7 @@ export interface HarnessRuntime {
 	): Promise<Session | undefined>;
 	setModel(modelId: string): void;
 	setMode(mode: AgentMode): void;
+	setReasoningEffort(effort: ReasoningEffort): void;
 	setSession(id: string | undefined): void;
 	allowExecAlways(): void;
 	allowRiskyAlways(toolName: string): void;
@@ -208,6 +215,7 @@ export interface CreateHarnessOptions {
 	 */
 	memory?: MemoryStore;
 	mode?: AgentMode;
+	reasoningEffort?: ReasoningEffort;
 	/** Load one-click MCP connections from ~/.harness. Default on unless a test provider is passed. */
 	loadIntegrations?: boolean;
 	/** Replaces the stdio MCP loader for the browser server. Tests only. */
@@ -253,6 +261,10 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 	let skills = loadActiveSkills();
 	const layers = loadInstructionLayers({ cwd, projectFile: config.instructionsFile });
 	let mode = parseAgentMode(options.mode ?? config.mode);
+	let reasoningEffort = resolveReasoningEffort({
+		option: options.reasoningEffort,
+		config: config.reasoningEffort,
+	});
 	const hostAppend = options.systemAppend?.trim();
 	const composePrompt = (nextMode: AgentMode) => {
 		const base = buildSystemPrompt({
@@ -400,6 +412,7 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 			apiKey,
 			model: id,
 			baseUrl: or.baseUrl,
+			reasoningEffort,
 			sessionId: () => activeSessionId,
 			...(title ? { title } : {}),
 		});
@@ -494,6 +507,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		get mode() {
 			return mode;
 		},
+		get reasoningEffort() {
+			return reasoningEffort;
+		},
 		spend: undefined,
 		get activeSessionId() {
 			return activeSessionId;
@@ -524,6 +540,10 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
 		setMode(next) {
 			mode = parseAgentMode(next);
 			systemPrompt = composePrompt(mode);
+		},
+		setReasoningEffort(next) {
+			reasoningEffort = parseReasoningEffort(next);
+			if (!options.provider) provider = makeProvider(modelId);
 		},
 		setSession(id) {
 			if (id !== activeSessionId) resetBrowserChat();

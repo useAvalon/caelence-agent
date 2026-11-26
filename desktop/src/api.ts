@@ -16,6 +16,7 @@ export interface DesktopState {
 	name: string;
 	cwd: string;
 	mode: string;
+	reasoningEffort: string;
 	modelId: string;
 	modelLabel: string;
 	modelTarget?: string;
@@ -47,7 +48,14 @@ export interface SlashCommand {
 	slot?: string;
 }
 
-export type SlashPickerKind = "model" | "mode" | "resume" | "image" | "video" | "transcribe";
+export type SlashPickerKind =
+	| "model"
+	| "mode"
+	| "effort"
+	| "resume"
+	| "image"
+	| "video"
+	| "transcribe";
 
 export type SlashOutcome =
 	| { kind: "text"; text: string }
@@ -161,6 +169,7 @@ export interface DesktopSettings {
 	hasApiKey: boolean;
 	apiKeyHint: string;
 	mode: string;
+	reasoningEffort: string;
 	modelId: string;
 	modelLabel: string;
 	hasGoogleOAuth: boolean;
@@ -415,6 +424,7 @@ export function saveSettings(
 		apiKey?: string;
 		mode?: string;
 		modelId?: string;
+		reasoningEffort?: string;
 		googleClientId?: string;
 		googleClientSecret?: string;
 		microsoftClientId?: string;

@@ -51,6 +51,7 @@ export function isUploadEditPending(pending: PendingApproval): boolean {
 export function pickerSelectedId(kind: SlashPickerKind, current: DesktopState): string | undefined {
 	if (kind === "model") return current.modelId;
 	if (kind === "mode") return current.mode;
+	if (kind === "effort") return current.reasoningEffort;
 	if (kind === "image") return current.imageModelId;
 	if (kind === "video") return current.videoModelId;
 	if (kind === "transcribe") return current.transcribeModelId;

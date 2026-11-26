@@ -336,7 +336,7 @@ export async function runTurn(
 					async (gen) => {
 						gen.update({ model: provider.modelId, input: { message: req.message } });
 						await agent.run(req.message, capture, { signal: options.signal });
-						const usage = provider.takeUsage?.();
+						const usage = await Promise.resolve(provider.takeUsage?.());
 						gen.update({
 							output: assistantText,
 							...(usage
@@ -375,6 +375,7 @@ export async function runTurn(
 				});
 				obs.score({ name: "generation_duration", value: Date.now() - startedAt });
 			} catch (err) {
+				await Promise.resolve(provider.takeUsage?.());
 				closeOpenTools("Turn stopped before this tool finished.");
 				await persistChain;
 				if (session) session = await finalize(deps, session, assistantText, thoughtText);

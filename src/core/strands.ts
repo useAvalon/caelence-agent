@@ -2,8 +2,21 @@
  * The only module that imports @strands-agents/sdk.
  */
 
-import type { JSONSchema, Model, StreamOptions, ToolSpec } from "@strands-agents/sdk";
-import { Agent, Message, type ModelStreamUpdateEvent, TextBlock, tool } from "@strands-agents/sdk";
+import type {
+	ContextManagerStrategy,
+	JSONSchema,
+	Model,
+	StreamOptions,
+	ToolSpec,
+} from "@strands-agents/sdk";
+import {
+	Agent,
+	Message,
+	type ModelStreamUpdateEvent,
+	Offload,
+	TextBlock,
+	tool,
+} from "@strands-agents/sdk";
 import { OpenAIModel } from "@strands-agents/sdk/models/openai";
 import { PRODUCT_NAME } from "../product.ts";
 import { withAutoRouterFetch } from "./auto-router.ts";
@@ -15,7 +28,8 @@ import type {
 	ProviderTurnRequest,
 } from "./events.ts";
 import type { ToolResult } from "./mcp.ts";
-import { createUsageTrackingFetch, type TokenUsage } from "./usage.ts";
+import { DEFAULT_REASONING_EFFORT, type ReasoningEffort } from "./reasoning.ts";
+import { addUsage, createUsageTrackingFetch, type TokenUsage } from "./usage.ts";
 
 export const DEFAULT_MAIN_MODEL_MAX_TOKENS = 8192;
 
@@ -43,6 +57,14 @@ export interface ConstructedAgent {
 }
 
 export type ConstructAgent = (input: AgentConstructionInput) => ConstructedAgent;
+
+export type { ContextManagerStrategy };
+export { Offload };
+
+export interface CreateConstructAgentOptions {
+	/** Strands context management, decided per turn (e.g. clear old tool results past a size). */
+	contextManager?: (input: AgentConstructionInput) => ContextManagerStrategy | undefined;
+}
 
 export interface StrandsBackedProvider extends MainModelProvider {
 	readonly sdkModel: Model;
@@ -134,7 +156,7 @@ function wrapModelAsProvider(
 	model: Model,
 	kind: string,
 	modelId: string,
-	takeUsage?: () => TokenUsage | undefined,
+	takeUsage?: () => TokenUsage | undefined | Promise<TokenUsage | undefined>,
 ): StrandsBackedProvider {
 	return {
 		kind,
@@ -152,6 +174,8 @@ export function constructOpenRouterProvider(options: {
 	model: string;
 	baseUrl: string;
 	maxTokens?: number;
+	/** OpenRouter reasoning effort. Defaults to low. */
+	reasoningEffort?: ReasoningEffort;
 	sessionId?: () => string | undefined;
 	/** `X-Title` sent to OpenRouter, so usage can be told apart by purpose. Defaults to the product name. */
 	title?: string;
@@ -166,7 +190,8 @@ export function constructOpenRouterProvider(options: {
 			},
 		};
 	}
-	let lastUsage: TokenUsage | undefined;
+	let accumulated: TokenUsage | undefined;
+	const probes = new Set<Promise<void>>();
 	let reasoningSink: ((text: string) => void) | undefined;
 	const model = new OpenAIModel({
 		api: "chat",
@@ -174,7 +199,10 @@ export function constructOpenRouterProvider(options: {
 		modelId: options.model,
 		maxTokens: options.maxTokens ?? DEFAULT_MAIN_MODEL_MAX_TOKENS,
 		params: {
-			reasoning: { effort: "low", exclude: false },
+			reasoning: {
+				effort: options.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
+				exclude: false,
+			},
 		},
 		clientConfig: {
 			baseURL: options.baseUrl.replace(/\/+$/, ""),
@@ -184,19 +212,24 @@ export function constructOpenRouterProvider(options: {
 			},
 			fetch: createUsageTrackingFetch(
 				(usage) => {
-					lastUsage = usage;
+					accumulated = addUsage(accumulated, usage);
 				},
 				withAutoRouterFetch(globalThis.fetch, {
 					model: options.model,
 					sessionId: options.sessionId,
 				}),
 				(text) => reasoningSink?.(text),
+				(done) => {
+					probes.add(done);
+					void done.finally(() => probes.delete(done));
+				},
 			),
 		},
 	});
-	const wrapped = wrapModelAsProvider(model, "openrouter", options.model, () => {
-		const usage = lastUsage;
-		lastUsage = undefined;
+	const wrapped = wrapModelAsProvider(model, "openrouter", options.model, async () => {
+		await Promise.all([...probes]);
+		const usage = accumulated;
+		accumulated = undefined;
 		return usage;
 	});
 	wrapped.setReasoningSink = (sink) => {
@@ -210,7 +243,7 @@ function toolResultToReturn(result: ToolResult): unknown {
 	return result.content.map((block) => block.text).join("\n");
 }
 
-export function createConstructAgent(): ConstructAgent {
+export function createConstructAgent(options: CreateConstructAgentOptions = {}): ConstructAgent {
 	return (input: AgentConstructionInput): ConstructedAgent => {
 		if (!isStrandsBackedProvider(input.provider)) {
 			throw new Error("createConstructAgent requires a Strands-backed MainModelProvider.");
@@ -231,11 +264,13 @@ export function createConstructAgent(): ConstructAgent {
 		const seededMessages = input.messages.map(
 			(m) => new Message({ role: m.role, content: [new TextBlock(m.content)] }),
 		);
+		const contextManager = options.contextManager?.(input);
 		const agent = new Agent({
 			model,
 			systemPrompt: input.systemPrompt,
 			tools,
 			...(seededMessages.length > 0 ? { messages: seededMessages } : {}),
+			...(contextManager !== undefined ? { contextManager } : {}),
 		});
 
 		return {

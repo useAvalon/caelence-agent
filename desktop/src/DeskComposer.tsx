@@ -289,6 +289,16 @@ export function DeskComposeBar(props: Readonly<{ desk: DeskReady }>): React.Reac
 					<span className="desk-compose-mode__dot" aria-hidden="true" />
 					{titleCase(desk.state.mode)}
 				</button>
+				<button
+					type="button"
+					className="desk-compose-effort"
+					aria-label="Choose reasoning effort"
+					disabled={!canPick}
+					onClick={() => void desk.openComposerPicker("effort")}
+				>
+					<span>{desk.state.reasoningEffort}</span>
+					<CaretDownIcon size={12} weight="bold" />
+				</button>
 				<ComposeMicControl
 					status={desk.status}
 					listening={desk.listening}

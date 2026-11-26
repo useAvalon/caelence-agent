@@ -1,6 +1,12 @@
 import { resolveOpenRouter } from "../config.ts";
 import { errorMessage } from "../core/errors.ts";
 import { AGENT_MODES, tryParseAgentMode } from "../core/mode.ts";
+import {
+	DEFAULT_REASONING_EFFORT,
+	REASONING_EFFORT_USAGE,
+	REASONING_EFFORTS,
+	tryParseReasoningEffort,
+} from "../core/reasoning.ts";
 import type { Session } from "../core/session.ts";
 import { maskSecret, writeOpenRouterKey } from "../desktop/secrets.ts";
 import { listEvalSuites, runNamedEval } from "../evals/runner.ts";
@@ -37,6 +43,7 @@ import { formatSkillList, parseSlashLine, resolveSlashSubmit, SLASH_HELP } from 
 export type SlashPickerKind =
 	| "model"
 	| "mode"
+	| "effort"
 	| "resume"
 	| "image"
 	| "video"
@@ -58,6 +65,7 @@ export type SlashOutcome =
 const PICKER_KINDS = new Set<SlashPickerKind>([
 	"model",
 	"mode",
+	"effort",
 	"resume",
 	"image",
 	"video",
@@ -292,6 +300,25 @@ async function handleMode(harness: HarnessRuntime, arg: string): Promise<SlashOu
 	};
 }
 
+async function handleEffort(harness: HarnessRuntime, arg: string): Promise<SlashOutcome> {
+	if (arg) {
+		const next = tryParseReasoningEffort(arg);
+		if (!next) return { kind: "text", text: REASONING_EFFORT_USAGE };
+		harness.setReasoningEffort(next);
+		return { kind: "applied" };
+	}
+	return {
+		kind: "picker",
+		title: "Reasoning effort",
+		picker: "effort",
+		items: REASONING_EFFORTS.map((item) => ({
+			id: item,
+			label: item,
+			...(item === DEFAULT_REASONING_EFFORT ? { hint: "default" } : {}),
+		})),
+	};
+}
+
 async function handleMediaPicker(
 	harness: HarnessRuntime,
 	arg: string,
@@ -437,6 +464,7 @@ const SLASH_HANDLERS: Record<string, SlashHandler> = {
 	},
 	model: handleModel,
 	mode: handleMode,
+	effort: handleEffort,
 	compact: async (harness) => {
 		const ok = await harness.compact();
 		return { kind: "text", text: ok ? "Compacted earlier turns." : "Nothing to compact." };
@@ -502,6 +530,12 @@ export async function applyPickerChoice(
 		const next = tryParseAgentMode(id);
 		if (!next) return { kind: "text", text: "Mode is ask, plan, or agent." };
 		harness.setMode(next);
+		return { kind: "applied" };
+	}
+	if (picker === "effort") {
+		const next = tryParseReasoningEffort(id);
+		if (!next) return { kind: "text", text: REASONING_EFFORT_USAGE };
+		harness.setReasoningEffort(next);
 		return { kind: "applied" };
 	}
 	const writePref = MEDIA_PICKER_PREFS[picker];

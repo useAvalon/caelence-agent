@@ -76,6 +76,15 @@ export {
 	tryParseAgentMode,
 } from "./core/mode.ts";
 export {
+	DEFAULT_REASONING_EFFORT,
+	parseReasoningEffort,
+	REASONING_EFFORT_USAGE,
+	REASONING_EFFORTS,
+	type ReasoningEffort,
+	resolveReasoningEffort,
+	tryParseReasoningEffort,
+} from "./core/reasoning.ts";
+export {
 	buildSystemPrompt,
 	type RunTurnDeps,
 	runTurn,
@@ -102,8 +111,11 @@ export {
 	type AgentTool,
 	type ConstructAgent,
 	type ConstructedAgent,
+	type ContextManagerStrategy,
+	type CreateConstructAgentOptions,
 	constructOpenRouterProvider,
 	createConstructAgent,
+	Offload,
 	type StrandsBackedProvider,
 } from "./core/strands.ts";
 export { addUsage, formatUsage, parseTokenUsage, type TokenUsage } from "./core/usage.ts";

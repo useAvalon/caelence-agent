@@ -31,6 +31,25 @@ export function parseTokenUsage(value: unknown): TokenUsage | undefined {
 	};
 }
 
+/** Keep the richer snapshot from one streamed request. Later zero-token chunks must not wipe cost. */
+export function mergeRequestUsage(prev: TokenUsage | undefined, next: TokenUsage): TokenUsage {
+	if (!prev) return next;
+	const nextCost = next.costUsd;
+	const prevCost = prev.costUsd;
+	const cost =
+		nextCost !== undefined && nextCost > 0
+			? nextCost
+			: prevCost !== undefined && prevCost > 0
+				? prevCost
+				: (nextCost ?? prevCost);
+	return {
+		promptTokens: Math.max(prev.promptTokens, next.promptTokens),
+		completionTokens: Math.max(prev.completionTokens, next.completionTokens),
+		totalTokens: Math.max(prev.totalTokens, next.totalTokens),
+		...(cost !== undefined ? { costUsd: cost } : {}),
+	};
+}
+
 export function addUsage(
 	a: TokenUsage | undefined,
 	b: TokenUsage | undefined,
@@ -119,20 +138,31 @@ async function pumpSse(
 	const reader = body.getReader();
 	const decoder = new TextDecoder();
 	let buf = "";
+	let requestUsage: TokenUsage | undefined;
+	const recordUsage = (usage: TokenUsage) => {
+		requestUsage = mergeRequestUsage(requestUsage, usage);
+	};
 	try {
 		while (true) {
 			const { done, value } = await reader.read();
 			if (value) buf += decoder.decode(value, { stream: !done });
 			const parts = buf.split("\n");
 			buf = done ? "" : (parts.pop() ?? "");
-			for (const line of parts) scanSseLine(line, onUsage, onReasoning);
+			for (const line of parts) scanSseLine(line, recordUsage, onReasoning);
 			if (done) {
-				if (buf) scanSseLine(buf, onUsage, onReasoning);
+				if (buf) scanSseLine(buf, recordUsage, onReasoning);
 				break;
 			}
 		}
 	} catch {
 		// probe side can fail independently of the model stream
+	}
+	if (requestUsage) {
+		try {
+			onUsage(requestUsage);
+		} catch {
+			// keep the probe settled even if the host callback throws
+		}
 	}
 }
 
@@ -143,6 +173,7 @@ export function createUsageTrackingFetch(
 	onUsage: (usage: TokenUsage) => void,
 	baseFetch: FetchFn = fetch,
 	onReasoning?: (text: string) => void,
+	onProbe?: (done: Promise<void>) => void,
 ): FetchFn {
 	return async (input, init) => {
 		const res = await baseFetch(input, init);
@@ -150,7 +181,8 @@ export function createUsageTrackingFetch(
 		if (!res.body) return res;
 		if (contentType.includes("text/event-stream")) {
 			const [out, probe] = res.body.tee();
-			void pumpSse(probe, onUsage, onReasoning);
+			const done = pumpSse(probe, onUsage, onReasoning);
+			onProbe?.(done);
 			return new Response(out, res);
 		}
 		if (contentType.includes("application/json")) {

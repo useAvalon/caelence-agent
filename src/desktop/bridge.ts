@@ -18,6 +18,7 @@ import type { ApprovalRequest } from "../core/approval.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { AgentEvent } from "../core/events.ts";
 import { tryParseAgentMode } from "../core/mode.ts";
+import { REASONING_EFFORT_USAGE, tryParseReasoningEffort } from "../core/reasoning.ts";
 import { normalizeSessionTitle, type Session, sessionTranscript } from "../core/session.ts";
 import { formatUsage } from "../core/usage.ts";
 import {
@@ -72,6 +73,7 @@ export interface DesktopState {
 	name: string;
 	cwd: string;
 	mode: string;
+	reasoningEffort: string;
 	modelId: string;
 	modelLabel: string;
 	modelTarget?: string;
@@ -144,6 +146,7 @@ function settingsPayload(harness: HarnessRuntime) {
 		hasApiKey: harness.hasApiKey,
 		apiKeyHint: harness.hasApiKey ? maskSecret(process.env.OPENROUTER_API_KEY ?? "") : "",
 		mode: harness.mode,
+		reasoningEffort: harness.reasoningEffort,
 		modelId: harness.modelId,
 		modelLabel: modelLabel(harness.modelId),
 		hasGoogleOAuth: Boolean(google?.clientId),
@@ -317,6 +320,7 @@ function snapshot(harness: HarnessRuntime, busy: boolean, title: string): Deskto
 		name: harness.config.name,
 		cwd: harness.cwd,
 		mode: harness.mode,
+		reasoningEffort: harness.reasoningEffort,
 		modelId: harness.modelId,
 		modelLabel: label,
 		...(target && target.toLowerCase() !== label.toLowerCase() ? { modelTarget: target } : {}),
@@ -699,19 +703,27 @@ export async function startDesktopBridge(options: StartDesktopBridgeOptions): Pr
 
 	const route_post_settings = async (req: Request, _url: URL): Promise<Response> => {
 		const body = await readJson(req);
+		const nextMode = typeof body.mode === "string" ? tryParseAgentMode(body.mode) : undefined;
+		if (typeof body.mode === "string" && !nextMode) {
+			return json({ error: "Mode is ask, plan, or agent." }, 400);
+		}
+		const nextEffort =
+			typeof body.reasoningEffort === "string"
+				? tryParseReasoningEffort(body.reasoningEffort)
+				: undefined;
+		if (typeof body.reasoningEffort === "string" && !nextEffort) {
+			return json({ error: REASONING_EFFORT_USAGE }, 400);
+		}
 		if (typeof body.apiKey === "string") {
 			writeOpenRouterKey(body.apiKey);
 			harness.setApiKey(body.apiKey);
 			refreshLiveNames();
 		}
-		if (typeof body.mode === "string") {
-			const next = tryParseAgentMode(body.mode);
-			if (!next) return json({ error: "Mode is ask, plan, or agent." }, 400);
-			harness.setMode(next);
-		}
+		if (nextMode) harness.setMode(nextMode);
 		if (typeof body.modelId === "string" && body.modelId.trim()) {
 			harness.setModel(body.modelId.trim());
 		}
+		if (nextEffort) harness.setReasoningEffort(nextEffort);
 		saveProviderOAuth(body, "google");
 		saveProviderOAuth(body, "microsoft");
 		if (typeof body.memoryEnabled === "boolean") {

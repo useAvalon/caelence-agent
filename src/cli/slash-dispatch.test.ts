@@ -35,12 +35,16 @@ function fakeHarness(overrides: Partial<HarnessRuntime> = {}): HarnessRuntime {
 		systemPrompt: "",
 		modelId: "openai/gpt-5.6-sol",
 		mode: "agent",
+		reasoningEffort: "low",
 		runTurn: async () => undefined,
 		setModel(id) {
 			this.modelId = id;
 		},
 		setMode(mode) {
 			this.mode = mode;
+		},
+		setReasoningEffort(effort) {
+			this.reasoningEffort = effort;
 		},
 		hasApiKey: false,
 		setApiKey() {},
@@ -176,6 +180,45 @@ describe("dispatchSlash", () => {
 		const result = await applyPickerChoice(harness, "mode", "agent");
 		expect(result).toEqual({ kind: "applied" });
 		expect(harness.mode).toBe("agent");
+	});
+
+	test("effort without an argument opens a picker", async () => {
+		const result = await dispatchSlash(fakeHarness(), "/effort");
+		expect(result.kind).toBe("picker");
+		if (result.kind === "picker") {
+			expect(result.picker).toBe("effort");
+			expect(result.items.map((item) => item.id)).toEqual([
+				"none",
+				"minimal",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+			]);
+			expect(result.items.find((item) => item.id === "low")?.hint).toBe("default");
+		}
+	});
+
+	test("effort picker stores the effort without a transcript line", async () => {
+		const harness = fakeHarness();
+		const result = await applyPickerChoice(harness, "effort", "high");
+		expect(result).toEqual({ kind: "applied" });
+		expect(harness.reasoningEffort).toBe("high");
+	});
+
+	test("effort with a value sets it", async () => {
+		const harness = fakeHarness();
+		const result = await dispatchSlash(harness, "/effort xhigh");
+		expect(result).toEqual({ kind: "applied" });
+		expect(harness.reasoningEffort).toBe("xhigh");
+	});
+
+	test("effort rejects an unknown value", async () => {
+		const result = await dispatchSlash(fakeHarness(), "/effort max");
+		expect(result).toEqual({
+			kind: "text",
+			text: "Effort is none, minimal, low, medium, high, or xhigh.",
+		});
 	});
 
 	test("skill picker adds a catalog skill and disables project skills", async () => {

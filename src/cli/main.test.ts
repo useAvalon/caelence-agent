@@ -40,6 +40,18 @@ describe("parseCliArgs", () => {
 		expect(parsed.message).toBe("hello");
 	});
 
+	test("reads --effort", () => {
+		const parsed = parseCliArgs(["--effort", "high", "chat", "-m", "hello"]);
+		expect(parsed.cmd).toBe("chat");
+		expect(parsed.effort).toBe("high");
+		expect(parsed.message).toBe("hello");
+	});
+
+	test("treats a bare --effort as present with no value", () => {
+		expect(parseCliArgs(["--effort"]).effort).toBe("");
+		expect(parseCliArgs(["chat", "-m", "hello"]).effort).toBeUndefined();
+	});
+
 	test("marks --cwd as explicit", () => {
 		expect(parseCliArgs(["eval"]).cwdExplicit).toBe(false);
 		expect(parseCliArgs(["--cwd", "/tmp/proj", "eval"]).cwdExplicit).toBe(true);

@@ -6,6 +6,7 @@ import type { Theme, ThemeName } from "./cli/theme.ts";
 import type { ExecApprovalPolicy } from "./core/approval.ts";
 import type { HookConfig } from "./core/hooks.ts";
 import type { AgentMode } from "./core/mode.ts";
+import type { ReasoningEffort } from "./core/reasoning.ts";
 import type { HarnessDecisionsConfig } from "./decisions/config.ts";
 import type { StatusVerbsConfig } from "./status/status-verbs.ts";
 
@@ -18,6 +19,11 @@ export interface ExtraMcpServerConfig {
 export interface HarnessConfig {
 	name: string;
 	model: string;
+	/**
+	 * OpenRouter reasoning effort for the chat model (`none`, `minimal`, `low`, `medium`, `high`,
+	 * `xhigh`). Defaults to `low`. `HARNESS_REASONING_EFFORT` overrides it.
+	 */
+	reasoningEffort?: ReasoningEffort;
 	instructionsFile: string;
 	skillsDir: string;
 	evalsDir: string;
@@ -80,6 +86,7 @@ export const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 export const DEFAULT_CONFIG: HarnessConfig = {
 	name: "caelence",
 	model: DEFAULT_MODEL,
+	reasoningEffort: "low",
 	instructionsFile: "AGENTS.md",
 	skillsDir: "skills",
 	evalsDir: "evals",

@@ -121,6 +121,7 @@ describe("resolveSlashSubmit", () => {
 	test("opens pickers for empty model, mode, and media commands", () => {
 		expect(resolveSlashSubmit("/image")).toEqual({ action: "send", line: "/image" });
 		expect(resolveSlashSubmit("/mode")).toEqual({ action: "send", line: "/mode" });
+		expect(resolveSlashSubmit("/effort")).toEqual({ action: "send", line: "/effort" });
 		expect(resolveSlashSubmit("/integrations")).toEqual({ action: "send", line: "/integrations" });
 		expect(resolveSlashSubmit("/skill find")).toEqual({ action: "send", line: "/skill find" });
 		expect(resolveSlashSubmit("/settings")).toEqual({ action: "send", line: "/settings" });
