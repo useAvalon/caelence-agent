@@ -125,6 +125,33 @@ describe("createHarness modes", () => {
 		}
 	});
 
+	test("applies reasoning effort from config and setReasoningEffort", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-effort-"));
+		const previous = process.env.HARNESS_REASONING_EFFORT;
+		delete process.env.HARNESS_REASONING_EFFORT;
+		try {
+			const harness = await createHarness({
+				cwd,
+				config: { ...DEFAULT_CONFIG, reasoningEffort: "high" },
+				provider: fakeProvider,
+				constructAgent: () => ({
+					async run() {
+						throw new Error("should not run");
+					},
+				}),
+				observability: noopObservability,
+			});
+			expect(harness.reasoningEffort).toBe("high");
+			harness.setReasoningEffort("medium");
+			expect(harness.reasoningEffort).toBe("medium");
+			harness.close();
+		} finally {
+			if (previous === undefined) delete process.env.HARNESS_REASONING_EFFORT;
+			else process.env.HARNESS_REASONING_EFFORT = previous;
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	test("accumulates usage on the runtime", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "harness-spend-"));
 		try {

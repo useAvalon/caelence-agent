@@ -9,6 +9,7 @@ import {
 } from "react";
 import { draftAfterPicker } from "../../src/cli/slash";
 import { AGENT_MODES } from "../../src/core/mode";
+import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS } from "../../src/core/reasoning";
 import {
 	type BridgeClient,
 	type DesktopState,
@@ -55,7 +56,7 @@ export function useDeskPicker(input: {
 	const pickerRequestRef = useRef(0);
 
 	const openComposerPicker = useCallback(
-		async (kind: "model" | "mode") => {
+		async (kind: "model" | "mode" | "effort") => {
 			if (
 				!bridge ||
 				listening ||
@@ -80,6 +81,21 @@ export function useDeskPicker(input: {
 					kind: "mode",
 					items,
 					index: pickerStartIndex(items, state?.mode),
+				});
+				setStatus("picker");
+				return;
+			}
+			if (kind === "effort") {
+				const items = REASONING_EFFORTS.map((id) => ({
+					id,
+					label: id,
+					...(id === DEFAULT_REASONING_EFFORT ? { hint: "default" } : {}),
+				}));
+				setPicker({
+					title: "Reasoning effort",
+					kind: "effort",
+					items,
+					index: pickerStartIndex(items, state?.reasoningEffort),
 				});
 				setStatus("picker");
 				return;

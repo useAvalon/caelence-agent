@@ -45,13 +45,89 @@ describe("constructOpenRouterProvider", () => {
 		expect(typeof provider.setReasoningSink).toBe("function");
 	});
 
-	it("reports no usage before any request has completed", () => {
+	it("sends the chosen reasoning effort on chat requests", async () => {
+		const bodies: unknown[] = [];
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+			if (typeof init?.body === "string") bodies.push(JSON.parse(init.body));
+			return new Response(JSON.stringify({ error: { message: "stop" } }), { status: 400 });
+		}) as unknown as typeof fetch;
+		try {
+			const provider = constructOpenRouterProvider({
+				apiKey: "sk-test",
+				model: "x-ai/grok",
+				baseUrl: BASE_URL,
+				reasoningEffort: "high",
+			});
+			for await (const _event of provider.stream({
+				messages: [{ role: "user", content: "hi" }],
+			})) {
+				// drain
+			}
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		expect(bodies.length).toBeGreaterThan(0);
+		const body = bodies[0] as { reasoning?: { effort?: string; exclude?: boolean } };
+		expect(body.reasoning).toEqual({ effort: "high", exclude: false });
+	});
+
+	it("reports no usage before any request has completed", async () => {
 		const provider = constructOpenRouterProvider({
 			apiKey: "sk-test",
 			model: "x-ai/grok",
 			baseUrl: BASE_URL,
 		});
-		expect(provider.takeUsage?.()).toBeUndefined();
+		expect(await provider.takeUsage?.()).toBeUndefined();
+	});
+
+	it("adds billed cost from every model call in the turn", async () => {
+		const remaining = [
+			{ prompt_tokens: 10, completion_tokens: 2, total_tokens: 12, cost: 0.01 },
+			{ prompt_tokens: 20, completion_tokens: 3, total_tokens: 23, cost: 0.02 },
+		];
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			const usage = remaining.shift() ?? {
+				prompt_tokens: 0,
+				completion_tokens: 0,
+				total_tokens: 0,
+				cost: 0,
+			};
+			const body = [
+				`data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`,
+				`data: ${JSON.stringify({
+					choices: [{ delta: {}, finish_reason: "stop" }],
+					usage,
+				})}\n\n`,
+				"data: [DONE]\n\n",
+			].join("");
+			return new Response(body, { headers: { "content-type": "text/event-stream" } });
+		}) as unknown as typeof fetch;
+		try {
+			const provider = constructOpenRouterProvider({
+				apiKey: "sk-test",
+				model: "anthropic/claude-opus-4.5",
+				baseUrl: BASE_URL,
+			});
+			for (let i = 0; i < 2; i++) {
+				for await (const _event of provider.stream({
+					messages: [{ role: "user", content: "hi" }],
+				})) {
+					// drain
+				}
+			}
+			const usage = await provider.takeUsage?.();
+			expect(usage).toEqual({
+				promptTokens: 30,
+				completionTokens: 5,
+				totalTokens: 35,
+				costUsd: 0.03,
+			});
+			expect(await provider.takeUsage?.()).toBeUndefined();
+		} finally {
+			globalThis.fetch = realFetch;
+		}
 	});
 });
 

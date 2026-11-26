@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { errorMessage } from "../../src/core/errors";
+import { REASONING_EFFORTS } from "../../src/core/reasoning";
 import {
 	type BridgeClient,
 	type DesktopSettings,
@@ -54,6 +55,7 @@ export function SettingsPanel(
 						const result = await saveSettings(props.bridge, {
 							mode: settings.mode,
 							modelId: settings.modelId,
+							reasoningEffort: settings.reasoningEffort,
 							...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
 							...(googleClientId.trim() ? { googleClientId: googleClientId.trim() } : {}),
 							...(microsoftClientId.trim() ? { microsoftClientId: microsoftClientId.trim() } : {}),
@@ -170,6 +172,22 @@ export function SettingsPanel(
 						<option value="ask">Ask</option>
 						<option value="plan">Plan</option>
 						<option value="agent">Agent</option>
+					</select>
+				</span>
+			</label>
+			<label>
+				<span>Reasoning effort</span>
+				<span className="desk-select-wrap">
+					<select
+						className="cel-input desk-select"
+						value={settings.reasoningEffort}
+						onChange={(event) => setSettings({ ...settings, reasoningEffort: event.target.value })}
+					>
+						{REASONING_EFFORTS.map((effort) => (
+							<option key={effort} value={effort}>
+								{effort}
+							</option>
+						))}
 					</select>
 				</span>
 			</label>

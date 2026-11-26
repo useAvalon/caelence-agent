@@ -53,6 +53,7 @@ export default {
 	evalsDir: "evals",
 	theme: "caelence",
 	mode: "agent",
+	reasoningEffort: "low",
 	tools: { exec: { approval: "prompt" } },
 	mcp: [],
 	// browser: { enabled: true }, // see Browser
@@ -62,7 +63,7 @@ export default {
 
 | File | Role |
 |------|------|
-| `harness.config.ts` | Name, model, mode, skills, evals, theme, approvals |
+| `harness.config.ts` | Name, model, reasoning effort, mode, skills, evals, theme, approvals |
 | `skills/**/SKILL.md` | Skills the agent can load |
 | `evals/<suite>/eval.ts` | Eval suites |
 | `AGENTS.md` | Project instructions |
@@ -72,7 +73,7 @@ export default {
 | `.harness/memory/` | Project memory facts, if enabled |
 | `~/.harness/integrations.json` | Connected hosted MCP servers |
 
-The desktop stores the OpenRouter key in `~/.harness`. The terminal UI reads `OPENROUTER_API_KEY`, and optionally `OPENROUTER_MODEL` and `OPENROUTER_BASE_URL`.
+The desktop stores the OpenRouter key in `~/.harness`. The terminal UI reads `OPENROUTER_API_KEY`, and optionally `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, and `HARNESS_REASONING_EFFORT`.
 
 ## Commands
 
@@ -90,7 +91,7 @@ caelence skill remove <name>  Uninstall a user skill, or disable a project skill
 caelence help                 This list
 ```
 
-Flags: `--mode ask|plan|agent`, `--cwd <path>`, `-m` / `--message <text>`.
+Flags: `--mode ask|plan|agent`, `--effort none|minimal|low|medium|high|xhigh`, `--cwd <path>`, `-m` / `--message <text>`.
 
 `caelence chat -m` is the non-interactive path for scripts and CI: it sends one message, prints the reply and any tool lines, then exits without opening the desktop or the terminal UI. `--mode` still applies, and if stdin is not a TTY, tool approval is deny.
 
@@ -115,6 +116,7 @@ In the desktop and the terminal UI, `/` opens slash commands, and Tab completes 
 /resume            pick a session by title
 /model             pick a model
 /mode              ask, plan, or agent
+/effort            reasoning effort
 /compact           summarize earlier turns
 /memory            remember across chats
 /image [prompt]    generate an image
@@ -280,7 +282,7 @@ await harness.runTurn("fix the failing test", (event) => {
 harness.close();
 ```
 
-`runTurn` streams `AgentEvent`s (text, tools, usage, errors) while it writes the session under `.harness/sessions`. Optional arguments include `config`, `mode`, `provider`, `extraTools`, `approvalPolicy`, and `observability`: pass a fake provider in tests, add MCP tools of your own through `extraTools`, and implement `approvalAsk` when a host UI needs to prompt for `exec` and `git_commit`.
+`runTurn` streams `AgentEvent`s (text, tools, usage, errors) while it writes the session under `.harness/sessions`. Optional arguments include `config`, `mode`, `reasoningEffort`, `provider`, `extraTools`, `approvalPolicy`, and `observability`: pass a fake provider in tests, add MCP tools of your own through `extraTools`, and implement `approvalAsk` when a host UI needs to prompt for `exec` and `git_commit`. Hosts that call `constructOpenRouterProvider` can pass `reasoningEffort` there too.
 
 If you only need types or tracing, `HarnessConfig` / `loadConfig` and the observability entry do not require constructing a harness at all.
 

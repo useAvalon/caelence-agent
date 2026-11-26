@@ -128,6 +128,33 @@ describe("desktop bridge", () => {
 			expect(body.hasApiKey).toBe(true);
 			expect(body.apiKeyHint).toBe("••••tkey");
 			expect(JSON.stringify(body)).not.toContain("sk-or-v1-secretkey");
+
+			const settings = await fetch(`${ctx.ready.url}/settings`, { headers: ctx.headers });
+			const loaded = (await settings.json()) as { reasoningEffort: string };
+			expect(loaded.reasoningEffort).toBe("low");
+			const savedEffort = await fetch(`${ctx.ready.url}/settings`, {
+				method: "POST",
+				headers: ctx.headers,
+				body: JSON.stringify({ reasoningEffort: "high" }),
+			});
+			const after = (await savedEffort.json()) as {
+				reasoningEffort: string;
+				state: { reasoningEffort: string };
+			};
+			expect(after.reasoningEffort).toBe("high");
+			expect(after.state.reasoningEffort).toBe("high");
+
+			const combined = await fetch(`${ctx.ready.url}/settings`, {
+				method: "POST",
+				headers: ctx.headers,
+				body: JSON.stringify({ modelId: "x-ai/grok", reasoningEffort: "nope" }),
+			});
+			expect(combined.status).toBe(400);
+			const unchanged = (await (
+				await fetch(`${ctx.ready.url}/settings`, { headers: ctx.headers })
+			).json()) as { modelId: string; reasoningEffort: string };
+			expect(unchanged.modelId).not.toBe("x-ai/grok");
+			expect(unchanged.reasoningEffort).toBe("high");
 		} finally {
 			await ctx.close();
 			if (prevHome === undefined) delete process.env.HARNESS_HOME;

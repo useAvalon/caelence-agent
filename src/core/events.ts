@@ -2,6 +2,8 @@
  * Agent event kinds. `error` and `completion` are the two terminal kinds.
  */
 
+import type { TokenUsage } from "./usage.ts";
+
 export type AgentEvent =
 	| { kind: "text_delta"; text: string }
 	| { kind: "reasoning_delta"; text: string }
@@ -85,13 +87,9 @@ export interface MainModelProvider {
 		request: ProviderTurnRequest,
 		options?: { signal?: AbortSignal },
 	): AsyncIterable<ProviderStreamEvent>;
-	/** Real usage from the last stream, if the provider reported it. */
-	takeUsage?():
-		| {
-				promptTokens: number;
-				completionTokens: number;
-				totalTokens: number;
-				costUsd?: number;
-		  }
-		| undefined;
+	/**
+	 * Billed usage for the turn's model calls, if the provider reported it.
+	 * May return a promise so streamed OpenRouter usage can finish arriving.
+	 */
+	takeUsage?(): TokenUsage | undefined | Promise<TokenUsage | undefined>;
 }

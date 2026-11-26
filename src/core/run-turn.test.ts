@@ -143,6 +143,118 @@ describe("runTurn", () => {
 		}
 	});
 
+	test("waits for async takeUsage so streamed cost is not dropped", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-usage-async-"));
+		try {
+			const provider: MainModelProvider = {
+				kind: "fake",
+				modelId: "fake",
+				async *stream() {
+					yield { type: "done" };
+				},
+				async takeUsage() {
+					await Promise.resolve();
+					return {
+						promptTokens: 80_000,
+						completionTokens: 4_000,
+						totalTokens: 84_000,
+						costUsd: 5.4,
+					};
+				},
+			};
+			const events: AgentEvent[] = [];
+			await runTurn(
+				{
+					cwd,
+					name: "test",
+					systemPrompt: "test",
+					tools: [],
+					approval: createExecApprovalGate({ policy: "deny" }),
+					store: createFileSessionStore(cwd),
+					provider,
+					constructAgent: () => ({
+						async run(_message, emit) {
+							emit({ kind: "text_delta", text: "ok" });
+						},
+					}),
+				},
+				{ message: "hi" },
+				(event) => events.push(event),
+			);
+			const usage = events.find((event) => event.kind === "usage");
+			expect(usage).toMatchObject({ kind: "usage", costUsd: 5.4, promptTokens: 80_000 });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("does not keep billed usage from a failed turn for the next turn", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "harness-usage-fail-"));
+		try {
+			let stored:
+				| { promptTokens: number; completionTokens: number; totalTokens: number; costUsd: number }
+				| undefined = {
+				promptTokens: 30,
+				completionTokens: 5,
+				totalTokens: 35,
+				costUsd: 0.03,
+			};
+			const provider: MainModelProvider = {
+				kind: "fake",
+				modelId: "fake",
+				async *stream() {
+					yield { type: "done" };
+				},
+				takeUsage() {
+					const usage = stored;
+					stored = undefined;
+					return usage;
+				},
+			};
+			const deps = {
+				cwd,
+				name: "test",
+				systemPrompt: "test",
+				tools: [],
+				approval: createExecApprovalGate({ policy: "deny" }),
+				store: createFileSessionStore(cwd),
+				provider,
+			};
+			const first: AgentEvent[] = [];
+			await runTurn(
+				{
+					...deps,
+					constructAgent: () => ({
+						async run() {
+							throw new Error("model failed");
+						},
+					}),
+				},
+				{ message: "hi" },
+				(event) => first.push(event),
+			);
+			expect(first.some((event) => event.kind === "usage")).toBe(false);
+			expect(first.some((event) => event.kind === "error")).toBe(true);
+
+			const second: AgentEvent[] = [];
+			await runTurn(
+				{
+					...deps,
+					constructAgent: () => ({
+						async run(_message, emit) {
+							emit({ kind: "text_delta", text: "ok" });
+						},
+					}),
+				},
+				{ message: "again" },
+				(event) => second.push(event),
+			);
+			expect(second.some((event) => event.kind === "usage")).toBe(false);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	test("emits todos after todo_write and honors a denying pre_tool hook", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "harness-todos-"));
 		try {

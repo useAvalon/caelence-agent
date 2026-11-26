@@ -8,6 +8,11 @@ import { loadConfig, resolveOpenRouter } from "../config.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { AgentEvent } from "../core/events.ts";
 import { type AgentMode, tryParseAgentMode } from "../core/mode.ts";
+import {
+	REASONING_EFFORT_USAGE,
+	type ReasoningEffort,
+	tryParseReasoningEffort,
+} from "../core/reasoning.ts";
 import { formatUsage } from "../core/usage.ts";
 import { applyStoredOpenRouterKey } from "../desktop/secrets.ts";
 import { createOpenRouterChat, listEvalSuites, runNamedEval } from "../evals/runner.ts";
@@ -53,6 +58,8 @@ Usage:
 
 Flags:
   --mode ask|plan|agent   Read-only, plan, or implement (default agent)
+  --effort none|minimal|low|medium|high|xhigh
+                          OpenRouter reasoning effort (default low)
   --cwd <path>            Workspace folder
   -m, --message <text>    Chat message
   --name <name>           Init project name (with --examples)
@@ -71,7 +78,7 @@ Install in another project:
   bun add github:useAvalon/caelence-agent
   bunx ${CLI_NAME}
 
-Desktop: paste an OpenRouter key in Settings. Optional env: OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL
+Desktop: paste an OpenRouter key in Settings. Optional env: OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL, HARNESS_REASONING_EFFORT
 Optional Langfuse: LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_BASE_URL
 Optional LLM-as-judge: LANGFUSE_QUALITY_EVAL=1 (off unless set; spends OpenRouter)
 `);
@@ -144,13 +151,21 @@ function hasCargo(env: NodeJS.ProcessEnv): boolean {
 	return existsSync(resolve(homedir(), ".cargo/bin/cargo"));
 }
 
-function takeFlag(args: string[], name: string): { value?: string; rest: string[] } {
+function takeFlag(
+	args: string[],
+	name: string,
+): {
+	value?: string;
+	rest: string[];
+	present: boolean;
+} {
 	const idx = args.indexOf(name);
-	if (idx < 0) return { rest: args };
+	if (idx < 0) return { rest: args, present: false };
 	const value = args[idx + 1];
 	return {
 		value,
 		rest: [...args.slice(0, idx), ...args.slice(idx + 2)],
+		present: true,
 	};
 }
 
@@ -162,6 +177,7 @@ export function parseCliArgs(argv: string[]): {
 	name?: string;
 	message?: string;
 	mode?: string;
+	effort?: string;
 } {
 	let args = argv;
 	const cwdFlag = takeFlag(args, "--cwd");
@@ -170,6 +186,8 @@ export function parseCliArgs(argv: string[]): {
 	args = nameFlag.rest;
 	const modeFlag = takeFlag(args, "--mode");
 	args = modeFlag.rest;
+	const effortFlag = takeFlag(args, "--effort");
+	args = effortFlag.rest;
 	const shortMsg = takeFlag(args, "-m");
 	args = shortMsg.rest;
 	const longMsg = takeFlag(args, "--message");
@@ -183,12 +201,18 @@ export function parseCliArgs(argv: string[]): {
 		name: nameFlag.value,
 		message: shortMsg.value ?? longMsg.value,
 		mode: modeFlag.value,
+		effort: effortFlag.present ? (effortFlag.value ?? "") : undefined,
 	};
 }
 
 function resolveCliMode(raw: string | undefined): AgentMode | undefined | "invalid" {
 	if (raw === undefined) return undefined;
 	return tryParseAgentMode(raw) ?? "invalid";
+}
+
+function resolveCliEffort(raw: string | undefined): ReasoningEffort | undefined | "invalid" {
+	if (raw === undefined) return undefined;
+	return tryParseReasoningEffort(raw) ?? "invalid";
 }
 
 type ParsedCli = ReturnType<typeof parseCliArgs>;
@@ -387,11 +411,17 @@ async function runChat(parsed: ParsedCli, mode: AgentMode | undefined): Promise<
 		process.stderr.write(`${CLI_NAME} chat -m <text>\n`);
 		return 1;
 	}
+	const effort = resolveCliEffort(parsed.effort);
+	if (effort === "invalid") {
+		process.stderr.write(`${REASONING_EFFORT_USAGE}\n`);
+		return 1;
+	}
 	const tty = Boolean(process.stdin.isTTY);
 	const harness = await createHarness({
 		cwd: agentCwd(parsed),
 		approvalPolicy: tty ? undefined : "deny",
 		...(mode ? { mode } : {}),
+		...(effort ? { reasoningEffort: effort } : {}),
 	});
 	try {
 		await harness.runTurn(message, printEvent, {
@@ -409,10 +439,15 @@ async function runChat(parsed: ParsedCli, mode: AgentMode | undefined): Promise<
 	return 0;
 }
 
-async function runTui(cwd: string, mode: AgentMode | undefined): Promise<number> {
+async function runTui(
+	cwd: string,
+	mode: AgentMode | undefined,
+	effort: ReasoningEffort | undefined,
+): Promise<number> {
 	const harness = await createHarness({
 		cwd,
 		...(mode ? { mode } : {}),
+		...(effort ? { reasoningEffort: effort } : {}),
 	});
 	try {
 		await startTui(harness);
@@ -461,8 +496,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 			process.stderr.write("Mode is ask, plan, or agent.\n");
 			return 1;
 		}
+		const effort = resolveCliEffort(parsed.effort);
+		if (effort === "invalid") {
+			process.stderr.write(`${REASONING_EFFORT_USAGE}\n`);
+			return 1;
+		}
 		applyStoredOpenRouterKey();
-		return runTui(agentCwd(parsed), mode);
+		return runTui(agentCwd(parsed), mode, effort);
 	}
 	const handler = COMMANDS[cmd];
 	if (handler) return handler(parsed);

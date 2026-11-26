@@ -2180,7 +2180,8 @@ p.desk-line__caption {
 
 .desk-compose-icon:hover:not(:disabled),
 .desk-compose-model:hover:not(:disabled),
-.desk-compose-mode:hover:not(:disabled) {
+.desk-compose-mode:hover:not(:disabled),
+.desk-compose-effort:hover:not(:disabled) {
 	background: var(--bg);
 	color: var(--icon-hover);
 }
@@ -2188,6 +2189,7 @@ p.desk-line__caption {
 .desk-compose-icon:disabled,
 .desk-compose-model:disabled,
 .desk-compose-mode:disabled,
+.desk-compose-effort:disabled,
 .desk-compose-send:disabled {
 	opacity: 0.4;
 	cursor: not-allowed;
@@ -2200,7 +2202,8 @@ p.desk-line__caption {
 }
 
 .desk-compose-model,
-.desk-compose-mode {
+.desk-compose-mode,
+.desk-compose-effort {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
@@ -2220,6 +2223,7 @@ p.desk-line__caption {
 }
 
 .desk-compose-model span,
+.desk-compose-effort span,
 .desk-compose-mode {
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -2274,7 +2278,8 @@ p.desk-line__caption {
 	}
 
 	.desk-compose-model,
-	.desk-compose-mode {
+	.desk-compose-mode,
+	.desk-compose-effort {
 		max-width: 7.5rem;
 		height: 30px;
 		padding: 0 10px;

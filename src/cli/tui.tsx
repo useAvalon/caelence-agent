@@ -170,6 +170,7 @@ function Header(
 		title: string;
 		status: UiStatus;
 		mode: string;
+		effort: string;
 		spend?: string;
 	}>,
 ): React.ReactElement {
@@ -184,7 +185,7 @@ function Header(
 				<Text bold> {PRODUCT_NAME}</Text>
 				<Text color={props.theme.muted}>
 					{" "}
-					{props.title} · {props.mode} · {label}
+					{props.title} · {props.mode} · {props.effort} · {label}
 					{target && target.toLowerCase() !== label.toLowerCase() ? ` · ${target}` : ""}
 					{props.spend ? ` · ${props.spend}` : ""}
 				</Text>
@@ -464,6 +465,7 @@ function ApprovalCard(props: Readonly<{ theme: Theme; req: ApprovalRequest }>): 
 function pickerSelectedValue(picker: SlashPickerKind, harness: HarnessRuntime): string | undefined {
 	if (picker === "model") return harness.modelId;
 	if (picker === "mode") return harness.mode;
+	if (picker === "effort") return harness.reasoningEffort;
 	const prefs = readMediaPrefs();
 	if (picker === "image") return prefs.imageModel;
 	if (picker === "video") return prefs.videoModel;
@@ -663,6 +665,7 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 	const [title, setTitle] = useState("New chat");
 	const [model, setModel] = useState(harness.modelId);
 	const [mode, setMode] = useState(harness.mode);
+	const [effort, setEffort] = useState(harness.reasoningEffort);
 	const [mediaLine, setMediaLine] = useState(() => formatMediaComposerLine(readMediaPrefs()));
 	const [spend, setSpend] = useState<TokenUsage | undefined>(harness.spend);
 	const [slashIndex, setSlashIndex] = useState(0);
@@ -772,6 +775,7 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 					}
 					setModel(harness.modelId);
 					setMode(harness.mode);
+					setEffort(harness.reasoningEffort);
 					refreshMedia();
 					const nextDraft = draftAfterPicker(state.kind);
 					if (nextDraft) setValue(nextDraft);
@@ -815,6 +819,7 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 				if (outcome.kind === "applied" || outcome.kind === "hold") {
 					setModel(harness.modelId);
 					setMode(harness.mode);
+					setEffort(harness.reasoningEffort);
 					refreshMedia();
 					return;
 				}
@@ -826,6 +831,7 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 					pushSystem(outcome.text);
 					setModel(harness.modelId);
 					setMode(harness.mode);
+					setEffort(harness.reasoningEffort);
 					return;
 				}
 				if (outcome.kind === "clear") {
@@ -988,6 +994,7 @@ function App(props: Readonly<{ harness: HarnessRuntime; theme: Theme }>): React.
 				title={title}
 				status={status}
 				mode={mode}
+				effort={effort}
 				spend={spend ? formatUsage(spend) : undefined}
 			/>
 			{picker ? (

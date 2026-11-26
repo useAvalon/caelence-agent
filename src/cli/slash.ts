@@ -19,6 +19,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 	{ name: "resume", hint: "pick a session by title" },
 	{ name: "model", hint: "pick a model" },
 	{ name: "mode", hint: "ask, plan, or agent" },
+	{ name: "effort", hint: "reasoning effort" },
 	{ name: "compact", hint: "summarize earlier turns" },
 	{ name: "memory", hint: "remember across chats", arg: true },
 	{ name: "image", hint: "generate an image", arg: true, slot: "[prompt]" },
@@ -58,6 +59,7 @@ export function formatSlashCommand(command: SlashCommand): string {
 export const PICKS_WHEN_EMPTY = new Set([
 	"model",
 	"mode",
+	"effort",
 	"resume",
 	"image",
 	"video",
