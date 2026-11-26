@@ -1,5 +1,17 @@
 # @useavalon/caelence-agent
 
+## 0.6.0
+
+### Minor Changes
+
+- [#62](https://github.com/useAvalon/caelence-agent/pull/62) [`4c67c80`](https://github.com/useAvalon/caelence-agent/commit/4c67c8095ca3e2634e8634ddeb52153817c90a73) Thanks [@MadsHaerup](https://github.com/MadsHaerup)! - Let users choose OpenRouter reasoning effort instead of hard-coding low.
+
+- [#62](https://github.com/useAvalon/caelence-agent/pull/62) [`4c67c80`](https://github.com/useAvalon/caelence-agent/commit/4c67c8095ca3e2634e8634ddeb52153817c90a73) Thanks [@MadsHaerup](https://github.com/MadsHaerup)! - Let hosts pass a Strands context manager into createConstructAgent, and re-export Offload so they do not need a second SDK copy.
+
+### Patch Changes
+
+- [#62](https://github.com/useAvalon/caelence-agent/pull/62) [`4c67c80`](https://github.com/useAvalon/caelence-agent/commit/4c67c8095ca3e2634e8634ddeb52153817c90a73) Thanks [@MadsHaerup](https://github.com/MadsHaerup)! - Count billed OpenRouter cost from every model call in a turn, not just the last stream chunk.
+
 ## 0.5.0
 
 ### Minor Changes
