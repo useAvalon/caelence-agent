@@ -111,8 +111,11 @@ export {
 	type AgentTool,
 	type ConstructAgent,
 	type ConstructedAgent,
+	type ContextManagerStrategy,
+	type CreateConstructAgentOptions,
 	constructOpenRouterProvider,
 	createConstructAgent,
+	Offload,
 	type StrandsBackedProvider,
 } from "./core/strands.ts";
 export { addUsage, formatUsage, parseTokenUsage, type TokenUsage } from "./core/usage.ts";

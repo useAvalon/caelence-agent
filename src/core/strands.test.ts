@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
+	type AgentConstructionInput,
 	type ConstructAgent,
 	constructOpenRouterProvider,
 	createConstructAgent,
+	Offload,
 	type StrandsBackedProvider,
 } from "../index.ts";
 
@@ -12,6 +14,7 @@ describe("strands exports", () => {
 	it("exposes the agent constructor and OpenRouter provider from the package entry", () => {
 		expect(typeof createConstructAgent).toBe("function");
 		expect(typeof constructOpenRouterProvider).toBe("function");
+		expect(typeof Offload.drop).toBe("function");
 	});
 });
 
@@ -161,5 +164,30 @@ describe("createConstructAgent", () => {
 			messages: [{ role: "user", content: "earlier" }],
 		});
 		expect(typeof agent.run).toBe("function");
+	});
+
+	it("asks the host for a context manager when constructing an agent", () => {
+		const seen: AgentConstructionInput[] = [];
+		const construct = createConstructAgent({
+			contextManager: (input) => {
+				seen.push(input);
+				return {
+					strategies: [Offload.drop("toolResults").when({ preserveRecent: 6 })],
+				};
+			},
+		});
+		const provider = constructOpenRouterProvider({
+			apiKey: "sk-test",
+			model: "m",
+			baseUrl: BASE_URL,
+		});
+		construct({
+			systemPrompt: "You are a test.",
+			tools: [],
+			provider,
+			messages: [],
+		});
+		expect(seen).toHaveLength(1);
+		expect(seen[0]?.systemPrompt).toBe("You are a test.");
 	});
 });

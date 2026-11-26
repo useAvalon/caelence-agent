@@ -282,7 +282,7 @@ await harness.runTurn("fix the failing test", (event) => {
 harness.close();
 ```
 
-`runTurn` streams `AgentEvent`s (text, tools, usage, errors) while it writes the session under `.harness/sessions`. Optional arguments include `config`, `mode`, `reasoningEffort`, `provider`, `extraTools`, `approvalPolicy`, and `observability`: pass a fake provider in tests, add MCP tools of your own through `extraTools`, and implement `approvalAsk` when a host UI needs to prompt for `exec` and `git_commit`. Hosts that call `constructOpenRouterProvider` can pass `reasoningEffort` there too.
+`runTurn` streams `AgentEvent`s (text, tools, usage, errors) while it writes the session under `.harness/sessions`. Optional arguments include `config`, `mode`, `reasoningEffort`, `provider`, `extraTools`, `approvalPolicy`, and `observability`: pass a fake provider in tests, add MCP tools of your own through `extraTools`, and implement `approvalAsk` when a host UI needs to prompt for `exec` and `git_commit`. Hosts that call `constructOpenRouterProvider` can pass `reasoningEffort` there too. `createConstructAgent({ contextManager })` can pass a Strands context strategy per turn; `Offload` and `ContextManagerStrategy` are re-exported so a host does not need its own copy of the SDK.
 
 If you only need types or tracing, `HarnessConfig` / `loadConfig` and the observability entry do not require constructing a harness at all.
 

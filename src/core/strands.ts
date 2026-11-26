@@ -2,8 +2,21 @@
  * The only module that imports @strands-agents/sdk.
  */
 
-import type { JSONSchema, Model, StreamOptions, ToolSpec } from "@strands-agents/sdk";
-import { Agent, Message, type ModelStreamUpdateEvent, TextBlock, tool } from "@strands-agents/sdk";
+import type {
+	ContextManagerStrategy,
+	JSONSchema,
+	Model,
+	StreamOptions,
+	ToolSpec,
+} from "@strands-agents/sdk";
+import {
+	Agent,
+	Message,
+	type ModelStreamUpdateEvent,
+	Offload,
+	TextBlock,
+	tool,
+} from "@strands-agents/sdk";
 import { OpenAIModel } from "@strands-agents/sdk/models/openai";
 import { PRODUCT_NAME } from "../product.ts";
 import { withAutoRouterFetch } from "./auto-router.ts";
@@ -44,6 +57,14 @@ export interface ConstructedAgent {
 }
 
 export type ConstructAgent = (input: AgentConstructionInput) => ConstructedAgent;
+
+export type { ContextManagerStrategy };
+export { Offload };
+
+export interface CreateConstructAgentOptions {
+	/** Strands context management, decided per turn (e.g. clear old tool results past a size). */
+	contextManager?: (input: AgentConstructionInput) => ContextManagerStrategy | undefined;
+}
 
 export interface StrandsBackedProvider extends MainModelProvider {
 	readonly sdkModel: Model;
@@ -222,7 +243,7 @@ function toolResultToReturn(result: ToolResult): unknown {
 	return result.content.map((block) => block.text).join("\n");
 }
 
-export function createConstructAgent(): ConstructAgent {
+export function createConstructAgent(options: CreateConstructAgentOptions = {}): ConstructAgent {
 	return (input: AgentConstructionInput): ConstructedAgent => {
 		if (!isStrandsBackedProvider(input.provider)) {
 			throw new Error("createConstructAgent requires a Strands-backed MainModelProvider.");
@@ -243,11 +264,13 @@ export function createConstructAgent(): ConstructAgent {
 		const seededMessages = input.messages.map(
 			(m) => new Message({ role: m.role, content: [new TextBlock(m.content)] }),
 		);
+		const contextManager = options.contextManager?.(input);
 		const agent = new Agent({
 			model,
 			systemPrompt: input.systemPrompt,
 			tools,
 			...(seededMessages.length > 0 ? { messages: seededMessages } : {}),
+			...(contextManager !== undefined ? { contextManager } : {}),
 		});
 
 		return {
